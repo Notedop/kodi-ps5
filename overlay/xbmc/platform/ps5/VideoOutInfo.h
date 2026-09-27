@@ -9,6 +9,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace KODI::PLATFORM::PS5
 {
@@ -54,7 +55,10 @@ int VrrUnpegFromFixedRate();
 // 8:8:8:8 format and the HDR 10-bit BT.2020 PQ 2:10:10:10 one.
 constexpr uint64_t kScanoutFormatSdr = UINT64_C(0x8000000000000000);
 constexpr uint64_t kScanoutFormatHdr = UINT64_C(0x8100070422000000);
-// Re-register the scanout buffers with `format` (GL driver addition); the
-// registration result, or -1 if this build of the driver lacks the addition.
-int SetScanoutFormat(uint64_t format);
+// Switch the scanout buffers to `format` (GL driver addition): in place
+// first (SubmitChangeBufferAttribute2), else unregister/register, else restore.
+// results[0..3] = change, unregister, register, restore (0x7fffffff: not
+// attempted). 0 if the format is in effect; -1 if the driver lacks the addition.
+int SetScanoutFormat(uint64_t format, int32_t results[4]);
+std::string DescribeScanoutResults(const int32_t results[4]);
 } // namespace KODI::PLATFORM::PS5

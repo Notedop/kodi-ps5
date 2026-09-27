@@ -110,6 +110,7 @@ private:
   double m_decodeMaxMs = 0.0;
   unsigned m_decodeCount = 0;
   bool m_alignmentKnown = false;
+  unsigned m_alignmentSamples = 0; // pictures sampled without a decision
   AVPixelFormat m_pixelFormat = AV_PIX_FMT_NV12;
   unsigned m_colorBits = 8;
   bool m_hasDisplayMetadata = false;

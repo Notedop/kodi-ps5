@@ -226,12 +226,13 @@ float CWinSystemPS5::SwitchOutputRate(const RESOLUTION_INFO& res)
 void CWinSystemPS5::StartHdrScanoutProbe()
 {
   using namespace KODI::PLATFORM::PS5;
-  const int rc = SetScanoutFormat(kScanoutFormatHdr);
-  CLog::Log(rc == 0 ? LOGINFO : LOGWARNING,
-            "PS5 HDR probe: scanout buffers in the HDR format: {:#x}{}", static_cast<uint32_t>(rc),
+  int32_t results[4];
+  const int rc = SetScanoutFormat(kScanoutFormatHdr, results);
+  CLog::Log(rc == 0 ? LOGINFO : LOGWARNING, "PS5 HDR probe: scanout buffers in the HDR format: {} ({}){}",
+            rc == 0 ? "in effect" : "refused", DescribeScanoutResults(results),
             rc == 0 ? " - the TV should report HDR for 3 seconds (the picture is wrong meanwhile)"
                     : (rc == -1 ? " (GL driver without the HDR addition: rebuild it with scripts/18)"
-                                : " (refused: title metadata or format)"));
+                                : ""));
   if (rc == 0)
   {
     m_hdrProbeActive = true;
@@ -244,9 +245,10 @@ void CWinSystemPS5::UpdateHdrScanoutProbe()
   if (!m_hdrProbeActive || std::chrono::steady_clock::now() < m_hdrProbeEnd)
     return;
   m_hdrProbeActive = false;
-  const int rc = KODI::PLATFORM::PS5::SetScanoutFormat(KODI::PLATFORM::PS5::kScanoutFormatSdr);
-  CLog::Log(rc == 0 ? LOGINFO : LOGWARNING, "PS5 HDR probe: scanout buffers back to SDR: {:#x}",
-            static_cast<uint32_t>(rc));
+  int32_t results[4];
+  const int rc = KODI::PLATFORM::PS5::SetScanoutFormat(KODI::PLATFORM::PS5::kScanoutFormatSdr, results);
+  CLog::Log(rc == 0 ? LOGINFO : LOGWARNING, "PS5 HDR probe: scanout buffers back to SDR: {} ({})",
+            rc == 0 ? "in effect" : "refused", KODI::PLATFORM::PS5::DescribeScanoutResults(results));
 }
 
 void CWinSystemPS5::RefreshLinkState()

@@ -8,6 +8,7 @@
 
 #include "VideoOutInfo.h"
 
+#include "utils/StringUtils.h"
 #include "utils/log.h"
 
 #include <cstddef>
@@ -59,7 +60,7 @@ int sceVideoOutWaitVblank(int32_t handle);
 int sceVideoOutGetVblankStatus(int32_t handle, void* status);
 int ps5_opengl_video_out_handle(void);
 // patches/ps5-opengl/kodi-additions.py (HDR part); weak: absent in older drivers
-int ps5_opengl_set_scanout_format(uint64_t pixel_format) __attribute__((weak));
+int ps5_opengl_set_scanout_format(uint64_t pixel_format, int32_t results[4]) __attribute__((weak));
 }
 
 
@@ -170,9 +171,27 @@ int KODI::PLATFORM::PS5::VrrUnpegFromFixedRate()
   return sceVideoOutVrrUnpegFromFixedRate(handle);
 }
 
-int KODI::PLATFORM::PS5::SetScanoutFormat(uint64_t format)
+int KODI::PLATFORM::PS5::SetScanoutFormat(uint64_t format, int32_t results[4])
 {
+  for (int i = 0; i < 4; ++i)
+    results[i] = 0x7fffffff;
   if (!ps5_opengl_set_scanout_format)
     return -1;
-  return ps5_opengl_set_scanout_format(format);
+  return ps5_opengl_set_scanout_format(format, results);
+}
+
+std::string KODI::PLATFORM::PS5::DescribeScanoutResults(const int32_t results[4])
+{
+  static const char* const names[4] = {"change", "unregister", "register", "restore"};
+  std::string text;
+  for (int i = 0; i < 4; ++i)
+  {
+    if (results[i] == 0x7fffffff)
+      continue;
+    if (!text.empty())
+      text += ", ";
+    text += names[i];
+    text += results[i] == 0 ? " ok" : StringUtils::Format(" {:#x}", static_cast<uint32_t>(results[i]));
+  }
+  return text.empty() ? "nothing attempted" : text;
 }

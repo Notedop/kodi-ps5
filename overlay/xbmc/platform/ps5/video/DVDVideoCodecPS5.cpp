@@ -181,8 +181,10 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
   m_vp9 = codec == VideoDec2Codec::VP9 || codec == VideoDec2Codec::VP9Profile2;
   m_tenBit = codec == VideoDec2Codec::HEVCMain10 || codec == VideoDec2Codec::VP9Profile2;
   m_alignmentKnown = !m_tenBit;
-  m_pixelFormat = m_tenBit ? AV_PIX_FMT_YUV420P16 : AV_PIX_FMT_NV12;
-  m_colorBits = m_tenBit ? 16 : 8;
+  m_alignmentSamples = 0;
+  // 10-bit: lower-aligned until a picture shows otherwise (DetectAlignment)
+  m_pixelFormat = m_tenBit ? AV_PIX_FMT_YUV420P10 : AV_PIX_FMT_NV12;
+  m_colorBits = m_tenBit ? 10 : 8;
   // HDR10 metadata, for Kodi's tone mapping on an SDR output
   m_hasDisplayMetadata = hints.masteringMetadata != nullptr;
   if (m_hasDisplayMetadata)
@@ -192,7 +194,7 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
     m_lightMetadata = *hints.contentLightMetadata;
 
   m_processInfo.SetVideoDecoderName(GetName(), true);
-  m_processInfo.SetVideoPixelFormat(m_tenBit ? "p010" : "nv12");
+  m_processInfo.SetVideoPixelFormat(m_tenBit ? "p010 (lsb)" : "nv12");
   if (m_vp9)
     CLog::Log(LOGINFO, "CDVDVideoCodecPS5: VP9: superframes split, hidden frames not shown");
   if (m_zeroCopy)
@@ -428,8 +430,12 @@ double CDVDVideoCodecPS5::NextPts()
 void CDVDVideoCodecPS5::DetectAlignment(const VideoDec2Picture& picture, unsigned width,
                                         unsigned height)
 {
-  // Sample the luma plane: P010 keeps the value in the upper 10 bits (the
-  // low 6 always zero), the other layout in the lower 10 (the top 6 zero).
+  // Sample the luma plane. Lower-aligned values (the documented layout for
+  // this decoder's Main10 and VP9 Profile 2 output) never set bits 10-15;
+  // upper-aligned ones (P010) never set bits 0-5. A dark picture - a fade-in
+  // from black - has luma 64 and chroma 512 in the lower layout, both with
+  // all low bits zero, so it decides nothing: the lower layout stays assumed
+  // and the next pictures are sampled, until one carries evidence.
   uint16_t lowBits = 0, highBits = 0;
   for (unsigned y = 0; y < height; y += std::max(1u, height / 64))
   {
@@ -440,16 +446,22 @@ void CDVDVideoCodecPS5::DetectAlignment(const VideoDec2Picture& picture, unsigne
       highBits |= row[x] & 0xfc00;
     }
   }
-  const bool msb = lowBits == 0 || highBits != 0;
-  m_pixelFormat = msb ? AV_PIX_FMT_YUV420P16 : AV_PIX_FMT_YUV420P10;
-  m_colorBits = msb ? 16 : 10;
-  m_alignmentKnown = true;
-  CLog::Log(LOGINFO,
-            "CDVDVideoCodecPS5: 10-bit samples {} (low bits {:#x}, high bits {:#x}): passed "
-            "as {}",
-            msb ? "in the upper 10 bits (P010)" : "in the lower 10 bits", lowBits, highBits,
-            msb ? "yuv420p16" : "yuv420p10");
-  m_processInfo.SetVideoPixelFormat(msb ? "p010" : "p010 (lsb)");
+  ++m_alignmentSamples;
+  if (highBits != 0)
+  {
+    m_pixelFormat = AV_PIX_FMT_YUV420P16;
+    m_colorBits = 16;
+    m_alignmentKnown = true;
+    m_processInfo.SetVideoPixelFormat("p010");
+    CLog::Log(LOGINFO, "CDVDVideoCodecPS5: 10-bit samples in the upper 10 bits (P010; high bits "
+              "{:#x}): passed as yuv420p16", highBits);
+  }
+  else if (lowBits != 0 || m_alignmentSamples >= 120)
+  {
+    m_alignmentKnown = true; // lower layout confirmed (or nothing dark enough to doubt it)
+    CLog::Log(LOGINFO, "CDVDVideoCodecPS5: 10-bit samples in the lower 10 bits (low bits {:#x}, "
+              "after {} pictures): passed as yuv420p10", lowBits, m_alignmentSamples);
+  }
 }
 
 bool CDVDVideoCodecPS5::Keep(const VideoDec2Picture& picture)
