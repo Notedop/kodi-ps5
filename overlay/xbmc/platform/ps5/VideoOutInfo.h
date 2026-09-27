@@ -50,11 +50,6 @@ bool IsVrrUnpegAvailable();
 // title's presentation. 0 on success; negative if unavailable.
 int VrrUnpegFromFixedRate();
 
-// kodi-probe-hdr: whether the system accepts an HDR output mode (colorimetry
-// BT.2020 PQ) through the mode API, after an all-"any" control; logs both
-// results and returns to the system mode after every accepted request.
-void ProbeHdrOutputMode();
-
 // Scanout buffer formats (as ProsperoLight registers them): the driver's SDR
 // 8:8:8:8 format and the HDR 10-bit BT.2020 PQ 2:10:10:10 one.
 constexpr uint64_t kScanoutFormatSdr = UINT64_C(0x8000000000000000);

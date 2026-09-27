@@ -240,50 +240,6 @@ bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& 
     return false;
   }
 
-  // kodi-probe-codecs: once, which codec types the decoder's memory query
-  // accepts (H.264 = 1 and HEVC = 0xee049 are the controls)
-  static bool codecsProbed = false;
-  if (!codecsProbed && getenv("KODI_PS5_PROBE_CODECS"))
-  {
-    codecsProbed = true;
-    std::string accepted;
-    auto probe = [&](uint32_t type)
-    {
-      sceVideodec2DecoderConfig probeConfig{};
-      probeConfig.size = sizeof(probeConfig);
-      probeConfig.resourceType = 1;
-      probeConfig.codecType = type;
-      probeConfig.maxWidth = 1920;
-      probeConfig.maxHeight = 1088;
-      probeConfig.maxDpbFrames = 16;
-      probeConfig.pipelineDepth = 1;
-      probeConfig.computeQueue = reinterpret_cast<uint64_t>(m_computeQueue);
-      probeConfig.cpuAffinity = 0x3f;
-      probeConfig.cpuPriority = 700;
-      probeConfig.optimizeProgressive = 1;
-      sceVideodec2DecoderMemory probeMemory{};
-      probeMemory.size = sizeof(probeMemory);
-      const int32_t probeRc = sceVideodec2QueryDecoderMemoryInfo(&probeConfig, &probeMemory);
-      if (probeRc == 0)
-      {
-        char entry[64];
-        snprintf(entry, sizeof(entry), " %#x", type);
-        accepted += entry;
-      }
-      return probeRc;
-    };
-    const int32_t h264Rc = probe(kCodecH264);
-    const int32_t hevcRc = probe(kCodecHEVC);
-    accepted.clear();
-    for (uint32_t type = 0; type < 64; ++type)
-      probe(type);
-    for (uint32_t type = 0x000ee040; type < 0x000ee060; ++type)
-      probe(type);
-    Log("[kodi-ps5] videodec2 codec probe: controls H.264 %#x, HEVC %#x; accepted codec types:%s\n",
-        static_cast<uint32_t>(h264Rc), static_cast<uint32_t>(hevcRc),
-        accepted.empty() ? " none" : accepted.c_str());
-  }
-
   // decoder: sized for 1080p or 2160p streams, with a full-size DPB for files
   sceVideodec2DecoderConfig config{};
   config.size = sizeof(config);

@@ -161,8 +161,7 @@ processes, so FTP cannot delete Kodi's data — these let Kodi do it:
 | `kodi-stereo-only` | a 2-channel audio port and no passthrough offered (the default is 8 channels, with Dolby/DTS passthrough available to Kodi's *Allow passthrough* setting) |
 | `kodi-multichannel-alt` | the other 8-channel order, if side and back speakers come out swapped |
 | `kodi-hw-pipeline2` | *(experiment)* hardware decoder with two frames in flight, for 4K60 VP9/HEVC that stutters at the default depth of one; `kodi-debug` logs decode times every 5 seconds |
-| `kodi-probe-codecs` | *(probe)* at the first video, log which codec types the hardware decoder accepts beyond H.264, HEVC and VP9 |
-| `kodi-probe-hdr` | *(probe)* at start-up, check whether the PS5 accepts an HDR output mode from Kodi, then switch the scanout buffers to the HDR format for 3 seconds (the TV should report HDR; the picture is wrong meanwhile) and log the results |
+| `kodi-probe-hdr` | *(probe, for HDR development)* after start-up, switch the scanout buffers to the HDR format for 3 seconds and log the result; the TV should report HDR meanwhile (the picture is wrong during those seconds) |
 
 ### Adding network sources
 

@@ -475,7 +475,6 @@ int main(int argc, char* argv[])
       {"/app0/kodi-stereo-only", "KODI_PS5_STEREO_ONLY"},
       {"/app0/kodi-multichannel-alt", "KODI_PS5_MULTICHANNEL_ALT"},
       {"/app0/kodi-hw-pipeline2", "KODI_PS5_HW_PIPELINE2"},
-      {"/app0/kodi-probe-codecs", "KODI_PS5_PROBE_CODECS"},
       {"/app0/kodi-probe-hdr", "KODI_PS5_PROBE_HDR"},
   };
   for (const auto& sw : kSwitches)

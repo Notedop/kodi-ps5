@@ -168,10 +168,7 @@ void CWinSystemPS5::EnsureSystemMode()
 void CWinSystemPS5::DetectOutputModes()
 {
   if (getenv("KODI_PS5_PROBE_HDR")) // switch kodi-probe-hdr, read by main.cpp
-  {
-    KODI::PLATFORM::PS5::ProbeHdrOutputMode();
     StartHdrScanoutProbe();
-  }
   // VRR for playback exists only on the system's own VRR link (the PS5's VRR
   // setting on, with a VRR-capable TV): that link follows Kodi's presentation.
   // Without it no VRR modes are offered - requesting the high-refresh preset
