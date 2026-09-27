@@ -124,7 +124,7 @@ protected:
 #endif
 
   float m_systemRefresh{0.0f}; // the system's own rate (0: not known yet)
-  bool m_vrrAvailable{false};  // high-refresh preset + VRR unpeg available
+  bool m_vrrAvailable{false};  // VRR modes offered: exactly while the output is a VRR link
   bool m_vrrActive{false};
   bool m_linkIsVrr{false};     // the system runs the title on a VRR link (PS5 VRR setting)
   float m_vrrTargetHz{0.0f};

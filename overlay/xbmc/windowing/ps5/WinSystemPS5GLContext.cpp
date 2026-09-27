@@ -225,6 +225,17 @@ void CWinSystemPS5GLContext::PresentRender(bool rendered, bool videoLayer)
 
   if (rendered || videoLayer)
   {
+    // the system may switch the output onto (or off) its VRR link at any time
+    if (m_videoOutLogged)
+    {
+      const auto now = std::chrono::steady_clock::now();
+      if (now - m_lastLinkCheck > std::chrono::seconds(2))
+      {
+        m_lastLinkCheck = now;
+        RefreshLinkState();
+      }
+    }
+
     // Under VRR the display refreshes when we present: pace presentation at
     // the target rate, so e.g. 25 fps video is shown at an even 50 Hz.
     if (const float vrrHz = VrrTargetRate(); vrrHz > 0.0f)

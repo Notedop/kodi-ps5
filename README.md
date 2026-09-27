@@ -156,7 +156,6 @@ processes, so FTP cannot delete Kodi's data — these let Kodi do it:
 | `kodi-uninstall` | wipe Kodi's data and quit; the title folder can then be deleted over FTP |
 | `kodi-debug` | debug-level logging (slower; remove when done) |
 | `kodi-swdecode` | software (FFmpeg) video decoding only, no hardware decoder |
-| `kodi-home-download0` | keep Kodi's data in the title's download-data area (`/download0`, 2 GiB, set by `downloadDataSize`) instead of the title folder; it is then separate from the app, but not reachable over FTP (`kodi.log` only via klog). `kodi-reset` / `kodi-uninstall` clear both locations |
 
 ### Adding network sources
 
@@ -227,16 +226,15 @@ Things that differ from a FreeBSD desktop and cost a crash each to find:
 - **Display.** The GL driver's render size is a build profile (2160p60 by
   default, `PS5_SCANOUT_HEIGHT` in `scripts/18-build-ps5-opengl.sh`); on
   another output the PS5 scales, and Kodi's log names the matching profile.
-  A title may request two output presets, the system's mode and the
-  high-refresh one (`param.json` high-refresh flags); explicit refresh rates
-  through the mode API are refused (`UNSUPPORTED_OUTPUT_MODE`). With the
-  PS5's VRR on, the system keeps the title on a ~120 Hz VRR link whatever it
-  requests, and that link follows the title's presentation - so Kodi's VRR
-  is frame pacing. `sceVideoOutVrrUnpegFromFixedRate` (in our extended
-  `libSceVideoOut` stub, `scripts/17`) is called as ProsperoLight does and
-  returns `0x8029001c` on firmware 10.01 without affecting the result. The
-  loader leaves *weak* imports empty and a title cannot resolve symbols by
-  name (`sceKernelDlsym`), so the stub import is a normal one.
+  Explicit refresh rates through the mode API are refused
+  (`UNSUPPORTED_OUTPUT_MODE`), so fixed 24/25/50 Hz are not available to
+  titles. With the PS5's VRR on (and a VRR TV), the system keeps the title on
+  a ~120 Hz VRR link that follows the title's presentation, so Kodi's VRR is
+  frame pacing on that link. Kodi offers its VRR modes exactly while that
+  link exists (checked every 2 seconds); without it, the output stays at the
+  fixed system rate. Releasing the high-refresh preset's peg
+  (`sceVideoOutVrrUnpegFromFixedRate`, in our extended `libSceVideoOut` stub)
+  returns `0x8029001c` on firmware 10.01, so Kodi does not use that route.
 - **GL driver.** 2D R8/RG8 textures are tiled and uploaded pixel by pixel, so
   video frames use rectangle textures (patch 0008); the driver reports wrong
   buffer ages, so Kodi redraws the whole screen each frame.

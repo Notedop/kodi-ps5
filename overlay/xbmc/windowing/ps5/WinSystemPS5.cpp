@@ -167,17 +167,14 @@ void CWinSystemPS5::EnsureSystemMode()
 
 void CWinSystemPS5::DetectOutputModes()
 {
-  // VRR needs the high-refresh preset (the PS5 turns it into VRR when its
-  // VRR setting is on) and the function that releases its 120 Hz peg.
-  using namespace KODI::PLATFORM::PS5;
-  // VRR for playback: on the system's own VRR link, or through the high-
-  // refresh preset plus the unpeg (as ProsperoLight engages it).
-  const bool preset = IsHighRefreshSupported();
-  const bool unpeg = IsVrrUnpegAvailable();
-  m_vrrAvailable = m_linkIsVrr || (preset && unpeg);
-  CLog::Log(LOGINFO, "CWinSystemPS5: VRR for playback {}{}",
-            m_vrrAvailable ? "available" : "not available",
-            m_linkIsVrr ? " (system VRR link)" : (m_vrrAvailable ? " (high-refresh preset)" : ""));
+  // VRR for playback exists only on the system's own VRR link (the PS5's VRR
+  // setting on, with a VRR-capable TV): that link follows Kodi's presentation.
+  // Without it no VRR modes are offered - requesting the high-refresh preset
+  // and releasing its peg never works on firmware 10.01 (unpeg 0x8029001c),
+  // it only blanked the TV and left Kodi believing in a rate never output.
+  m_vrrAvailable = m_linkIsVrr;
+  CLog::Log(LOGINFO, "CWinSystemPS5: VRR for playback {}",
+            m_vrrAvailable ? "available (system VRR link)" : "not available (no VRR link)");
   if (m_vrrAvailable)
     UpdateResolutions();
 }
@@ -188,7 +185,8 @@ float CWinSystemPS5::SwitchOutputRate(const RESOLUTION_INFO& res)
   // rate" (patch 0012: On start/stop, during playback) and the desktop mode
   // otherwise, so the requested mode alone decides. "Sync playback to
   // display" plays no part in it.
-  using namespace KODI::PLATFORM::PS5;
+  if (!m_vrrActive)
+    RefreshLinkState();
   const bool vrrMode = res.strMode.find(kVrrModeTag) != std::string::npos;
   const bool wantVrr = vrrMode && m_vrrAvailable && res.fRefreshRate > 0.0f;
 
@@ -196,62 +194,25 @@ float CWinSystemPS5::SwitchOutputRate(const RESOLUTION_INFO& res)
   {
     if (m_vrrActive)
     {
-      OnLostDevice();
-      // as ProsperoLight returns to its launcher: request the system mode
-      const int rc = SetOutputMode(kOutputModeDefault);
       m_vrrActive = false;
       m_vrrTargetHz = 0.0f;
       m_vblankClockUnreliable = false;
-      RefreshLinkState();
       m_fRefreshRate = m_outputRefresh = m_systemRefresh > 0.0f ? m_systemRefresh : 59.94f;
-      CLog::Log(LOGINFO, "CWinSystemPS5: display mode {}: VRR off ({:#x}); {}", res.strMode,
-                static_cast<uint32_t>(rc), PacingDescription());
-      OnResetDevice();
+      CLog::Log(LOGINFO, "CWinSystemPS5: display mode {}: VRR off; {}", res.strMode,
+                PacingDescription());
     }
     else if (vrrMode)
-      CLog::Log(LOGWARNING, "CWinSystemPS5: display mode {} requested, but VRR is not available: "
+      CLog::Log(LOGWARNING, "CWinSystemPS5: display mode {} requested without a VRR link: "
                 "system rate; {}", res.strMode, PacingDescription());
     return m_fRefreshRate;
   }
 
+  // On the VRR link the display follows our presentation: engaging VRR is
+  // pacing at the mode's rate (see PresentRender). No output mode changes.
   if (!m_vrrActive)
   {
-    // Engage VRR. On the system's VRR link the display already follows our
-    // presentation; the unpeg is still issued, as ProsperoLight does, and only
-    // logged. Otherwise: the high-refresh preset (VRR pegged at 120 Hz), then
-    // the unpeg; if either fails, back to the system mode at once.
-    OnLostDevice();
-    int rc = 0;
-    const char* step = "VRR unpeg";
-    if (m_linkIsVrr)
-    {
-      const int unpegRc = VrrUnpegFromFixedRate();
-      CLog::Log(LOGINFO, "CWinSystemPS5: VRR link: unpeg {:#x}", static_cast<uint32_t>(unpegRc));
-    }
-    else
-    {
-      rc = SetOutputMode(kOutputModeHighRefresh);
-      step = "high-refresh preset";
-      if (rc == 0)
-      {
-        step = "VRR unpeg";
-        rc = VrrUnpegFromFixedRate();
-      }
-    }
-    if (rc != 0)
-    {
-      SetOutputMode(kOutputModeDefault);
-      RefreshLinkState();
-      m_vrrAvailable = m_linkIsVrr; // without a VRR link, not offered again this session
-      CLog::Log(LOGWARNING, "CWinSystemPS5: display mode {}: VRR not engaged ({} {:#x}); {}",
-                res.strMode, step, static_cast<uint32_t>(rc), PacingDescription());
-      OnResetDevice();
-      if (!m_linkIsVrr)
-        return m_fRefreshRate;
-    }
     m_vrrActive = true;
     m_vblankClockUnreliable = false;
-    OnResetDevice();
   }
   m_vrrTargetHz = res.fRefreshRate;
   m_fRefreshRate = m_outputRefresh = res.fRefreshRate;
@@ -262,11 +223,35 @@ float CWinSystemPS5::SwitchOutputRate(const RESOLUTION_INFO& res)
 
 void CWinSystemPS5::RefreshLinkState()
 {
-  // A VRR link reports ~120 Hz; the display then follows our presentation,
-  // so presentation must always be paced on it (never unthrottled).
+  // A VRR link reports ~120 Hz. The system switches a title onto it (or off
+  // it) at a moment of its own choosing, so this is re-read before every
+  // mode decision and every 2 seconds while presenting; the VRR modes are
+  // offered exactly while the link exists.
   const float hz = KODI::PLATFORM::PS5::QueryRefreshRate();
-  if (hz > 0.0f)
-    m_linkIsVrr = hz > 100.0f;
+  if (hz <= 0.0f)
+    return;
+  const bool link = hz > 100.0f;
+  if (link == m_linkIsVrr)
+    return;
+  m_linkIsVrr = link;
+  m_vrrAvailable = link;
+  if (link)
+  {
+    if (m_systemRefresh <= 0.0f || m_systemRefresh > 100.0f)
+      m_systemRefresh = 59.94f;
+  }
+  else
+  {
+    m_vrrActive = false;
+    m_vrrTargetHz = 0.0f;
+    m_systemRefresh = hz;
+  }
+  if (!m_vrrActive)
+    m_fRefreshRate = m_outputRefresh = m_systemRefresh;
+  CLog::Log(LOGINFO, "CWinSystemPS5: the output is {} ({:.3f} Hz); VRR for playback {}; {}",
+            link ? "now a VRR link" : "no longer a VRR link", hz,
+            link ? "available" : "not available", PacingDescription());
+  UpdateResolutions(); // add or remove the VRR modes
 }
 
 std::string CWinSystemPS5::PacingDescription() const
