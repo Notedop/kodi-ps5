@@ -218,6 +218,10 @@ p["downloadDataSize"] = max(int(p.get("downloadDataSize", 0)), 2048)  # /downloa
 # as ProsperoLight declares): the PS5 runs VRR through this preset, which Kodi
 # uses only for VRR during playback, never as a fixed 120 Hz output.
 p["attribute3"] = int(p.get("attribute3", 0)) | 0x80040
+# HDR-capable title metadata: without it, registering scanout buffers in the
+# HDR format fails (BlackBearReloaded's video research). The flags
+# ProsperoLight declares, which outputs HDR10 as a homebrew title.
+p["attribute"] = int(p.get("attribute", 0)) | 0x62000000
 category = os.environ.get("KODI_CATEGORY", "game")
 if category == "media":
     p["applicationCategoryType"] = 65536

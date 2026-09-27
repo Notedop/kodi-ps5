@@ -167,6 +167,11 @@ void CWinSystemPS5::EnsureSystemMode()
 
 void CWinSystemPS5::DetectOutputModes()
 {
+  if (getenv("KODI_PS5_PROBE_HDR")) // switch kodi-probe-hdr, read by main.cpp
+  {
+    KODI::PLATFORM::PS5::ProbeHdrOutputMode();
+    StartHdrScanoutProbe();
+  }
   // VRR for playback exists only on the system's own VRR link (the PS5's VRR
   // setting on, with a VRR-capable TV): that link follows Kodi's presentation.
   // Without it no VRR modes are offered - requesting the high-refresh preset
@@ -219,6 +224,32 @@ float CWinSystemPS5::SwitchOutputRate(const RESOLUTION_INFO& res)
   CLog::Log(LOGINFO, "CWinSystemPS5: display mode {}: VRR on; {}", res.strMode,
             PacingDescription());
   return m_fRefreshRate;
+}
+
+void CWinSystemPS5::StartHdrScanoutProbe()
+{
+  using namespace KODI::PLATFORM::PS5;
+  const int rc = SetScanoutFormat(kScanoutFormatHdr);
+  CLog::Log(rc == 0 ? LOGINFO : LOGWARNING,
+            "PS5 HDR probe: scanout buffers in the HDR format: {:#x}{}", static_cast<uint32_t>(rc),
+            rc == 0 ? " - the TV should report HDR for 3 seconds (the picture is wrong meanwhile)"
+                    : (rc == -1 ? " (GL driver without the HDR addition: rebuild it with scripts/18)"
+                                : " (refused: title metadata or format)"));
+  if (rc == 0)
+  {
+    m_hdrProbeActive = true;
+    m_hdrProbeEnd = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  }
+}
+
+void CWinSystemPS5::UpdateHdrScanoutProbe()
+{
+  if (!m_hdrProbeActive || std::chrono::steady_clock::now() < m_hdrProbeEnd)
+    return;
+  m_hdrProbeActive = false;
+  const int rc = KODI::PLATFORM::PS5::SetScanoutFormat(KODI::PLATFORM::PS5::kScanoutFormatSdr);
+  CLog::Log(rc == 0 ? LOGINFO : LOGWARNING, "PS5 HDR probe: scanout buffers back to SDR: {:#x}",
+            static_cast<uint32_t>(rc));
 }
 
 void CWinSystemPS5::RefreshLinkState()

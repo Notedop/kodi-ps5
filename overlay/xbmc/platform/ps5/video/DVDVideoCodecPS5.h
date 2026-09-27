@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "VideoBufferPS5.h"
 #include "VideoDec2.h"
 #include "cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h"
 
@@ -20,6 +21,13 @@
 struct AVBSFContext;
 struct AVPacket;
 class CVideoBuffer;
+
+extern "C"
+{
+struct AVFilterGraph;
+struct AVFilterContext;
+struct AVFrame;
+}
 
 namespace KODI::PLATFORM::PS5
 {
@@ -62,7 +70,15 @@ private:
   double NextPts();
   void ClearQueue();
 
-  CVideoDec2 m_decoder;
+  // shared with zero-copy pictures: the decoder's memory lives until the last
+  // picture showing one of its frames is released
+  std::shared_ptr<KODI::PLATFORM::PS5::CVideoDec2> m_decoder =
+      std::make_shared<KODI::PLATFORM::PS5::CVideoDec2>();
+  bool m_zeroCopy = false; // kodi-zerocopy, with the GL driver additions present
+  std::shared_ptr<KODI::PLATFORM::PS5::CVideoBufferPoolPS5> m_zeroCopyPool;
+  // zero-copy: access units waiting for a free frame, in stream order
+  std::deque<std::vector<uint8_t>> m_pendingAus;
+  bool RetryPending();
   AVBSFContext* m_bsf = nullptr;
   AVPacket* m_packet = nullptr;
 
@@ -79,6 +95,35 @@ private:
   AVColorSpace m_colorSpace = AVCOL_SPC_UNSPECIFIED;
   AVColorPrimaries m_colorPrimaries = AVCOL_PRI_UNSPECIFIED;
   AVColorTransferCharacteristic m_colorTransfer = AVCOL_TRC_UNSPECIFIED;
+
+  // 10-bit HEVC: the decoder's samples are 16 bits wide, the value either in
+  // the upper 10 bits (P010) or the lower 10; decided on the first picture.
+  bool m_tenBit = false;
+  bool m_vp9 = false; // superframes split; hidden frames' outputs not shown
+  bool m_alignmentKnown = false;
+  AVPixelFormat m_pixelFormat = AV_PIX_FMT_NV12;
+  unsigned m_colorBits = 8;
+  bool m_hasDisplayMetadata = false;
+  AVMasteringDisplayMetadata m_displayMetadata{};
+  bool m_hasLightMetadata = false;
+  AVContentLightMetadata m_lightMetadata{};
+
+  void DetectAlignment(const VideoDec2Picture& picture, unsigned width, unsigned height);
+
+  // kodi-hw-interlaced: FFmpeg's bwdif over the hardware decoder's (woven)
+  // frames, one progressive picture per field
+  bool m_deinterlace = false;
+  AVFilterGraph* m_deintGraph = nullptr;
+  AVFilterContext* m_deintSource = nullptr;
+  AVFilterContext* m_deintSink = nullptr;
+  AVFrame* m_deintIn = nullptr;
+  AVFrame* m_deintOut = nullptr;
+  int64_t m_deintFrames = 0;
+  std::deque<double> m_deintPts; // input pictures' pts, for the two fields each
+  unsigned m_deintOutputs = 0;   // outputs of the front input so far
+  bool SetupDeinterlacer();
+  void CloseDeinterlacer();
+  bool KeepDeinterlaced(const VideoDec2Picture& picture, unsigned width, unsigned height);
   bool m_fullRange = false;
   std::string m_stereoMode;
 

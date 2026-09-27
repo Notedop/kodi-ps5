@@ -49,4 +49,17 @@ bool IsVrrUnpegAvailable();
 // Release a VRR output from its fixed 120 Hz peg, so the display follows the
 // title's presentation. 0 on success; negative if unavailable.
 int VrrUnpegFromFixedRate();
+
+// kodi-probe-hdr: whether the system accepts an HDR output mode (colorimetry
+// BT.2020 PQ) through the mode API, after an all-"any" control; logs both
+// results and returns to the system mode after every accepted request.
+void ProbeHdrOutputMode();
+
+// Scanout buffer formats (as ProsperoLight registers them): the driver's SDR
+// 8:8:8:8 format and the HDR 10-bit BT.2020 PQ 2:10:10:10 one.
+constexpr uint64_t kScanoutFormatSdr = UINT64_C(0x8000000000000000);
+constexpr uint64_t kScanoutFormatHdr = UINT64_C(0x8100070422000000);
+// Re-register the scanout buffers with `format` (GL driver addition); the
+// registration result, or -1 if this build of the driver lacks the addition.
+int SetScanoutFormat(uint64_t format);
 } // namespace KODI::PLATFORM::PS5

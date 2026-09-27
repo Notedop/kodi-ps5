@@ -23,13 +23,13 @@ working on 4.03 (ItemzFlow + etaHEN 2.3b).
 
 | Works | Not yet |
 | --- | --- |
-| Estuary GUI rendered natively at 3840x2160 (OpenGL 4.6 on the PS5 GPU) | HEVC Main10 / HDR in hardware (10-bit uses FFmpeg) |
+| Estuary GUI rendered natively at 3840x2160 (OpenGL 4.6 on the PS5 GPU) | HDR output (HDR10 video is tone-mapped to SDR); H.264 High 10 and HEVC 4:2:2/4:4:4 in hardware |
 | Menus and stopped state at 60 Hz (59.94) | Fixed 24/25/50 Hz output modes (the PS5 refuses explicit rates from titles) |
 | VRR during playback, matched to the video's frame rate (see *Display*) | VRR with the PS5's VRR setting off |
 | *Sync playback to display* on a fixed 59.94 Hz output | The player debug overlay (L3) during VRR raises the rate to ~120 Hz |
 | DualSense navigation (as keyboard events) | Internet access via curl (add-on repository, online streams) |
 | Audio (UI sounds, playback) | Python add-ons (Python is not built yet) |
-| Video playback: H.264 and HEVC Main in hardware (VideoDec2), everything else in FFmpeg | Binary add-ons (no `dlopen` in a title) |
+| Video playback in hardware (VideoDec2): H.264 (8-bit), HEVC Main and **HEVC Main 10** (x265 10-bit, HDR10), and, with `kodi-hw-vp9`, **VP9 Profile 0 and 2** (8/10-bit WebM); everything else in FFmpeg | Binary add-ons (no `dlopen` in a title) |
 | SMB2/3 and NFS network sources, UPnP | Listing under the Media tab (the GL driver fails in that sandbox) |
 | Thumbnails, databases, settings | Network browsing of `smb://` (enter the server's IP) |
 
@@ -156,6 +156,14 @@ processes, so FTP cannot delete Kodi's data — these let Kodi do it:
 | `kodi-uninstall` | wipe Kodi's data and quit; the title folder can then be deleted over FTP |
 | `kodi-debug` | debug-level logging (slower; remove when done) |
 | `kodi-swdecode` | software (FFmpeg) video decoding only, no hardware decoder |
+| `kodi-zerocopy` | *(test)* zero-copy video: the hardware decoder's frames are shown directly, without copying (needs the GL driver built by `scripts/18` with the zero-copy additions) |
+| `kodi-hw-interlaced` | *(test)* interlaced streams (1080i TV recordings) to the hardware decoder, deinterlaced with FFmpeg's bwdif: one progressive picture per field |
+| `kodi-multichannel` | *(test)* 8-channel audio output: 5.1/7.1 tracks keep their channels (set Kodi's *Settings → System → Audio → Number of channels* to 5.1 or 7.1) |
+| `kodi-multichannel-alt` | *(test)* with `kodi-multichannel`: the other 8-channel order, if side and back speakers come out swapped |
+| `kodi-probe-codecs` | *(test)* at the first video, log which codec types the hardware decoder accepts beyond H.264 and HEVC |
+| `kodi-hw-vp9` | *(test)* VP9 Profile 0/2 in the hardware decoder (superframes split, hidden frames not shown); without it VP9 plays in FFmpeg |
+| `kodi-passthrough` | *(test, **start at low volume**)* Dolby Digital, Dolby Digital Plus and DTS to an AV receiver as IEC 61937 inside PCM (PS5 *Audio Format*: Linear PCM; Kodi: *Allow passthrough*). Works only if the PS5 passes PCM through bit-exactly; otherwise the receiver plays the packets as loud noise |
+| `kodi-probe-hdr` | *(test)* at start-up, check whether the PS5 accepts an HDR output mode from Kodi, then switch the scanout buffers to the HDR format for 3 seconds (the TV should report HDR; the picture is wrong meanwhile) and log the results |
 
 ### Adding network sources
 
@@ -241,7 +249,7 @@ Things that differ from a FreeBSD desktop and cost a crash each to find:
 
 ## Roadmap
 
-1. Hardware decoding: HEVC Main10 and HDR, zero-copy into GL.
+1. Hardware decoding: HDR output, zero-copy into GL.
 2. Internet access (curl/TLS).
 3. GL driver: cheaper clears and draws at 4K (render headroom for VRR at
    higher rates), runtime-selected render size, a third display buffer.
@@ -269,6 +277,9 @@ LF (enforced by `.gitattributes`); the scripts are bash and break on CRLF.
 - Ronnie Sahlberg — [libsmb2](https://github.com/sahlberg/libsmb2).
 - ProsperoLight — reference for direct-memory allocation, the high-refresh
   entitlement and VRR on a PS5 title.
+- BlackBearReloaded's PS5 Hardware Video Decoding Research — console-proven
+  VideoDec2 modes (VP9 Profile 0/2, low-aligned 10-bit surfaces, superframe
+  and hidden-frame handling); the prosper project for the VP9 codec value.
 - The PS5 SDL backend, whose observations of the audio and pad libraries the
   `sce/` headers restate.
 - Team Kodi — for Kodi itself.

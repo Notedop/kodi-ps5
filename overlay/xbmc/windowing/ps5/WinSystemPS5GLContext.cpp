@@ -225,6 +225,8 @@ void CWinSystemPS5GLContext::PresentRender(bool rendered, bool videoLayer)
 
   if (rendered || videoLayer)
   {
+    UpdateHdrScanoutProbe(); // kodi-probe-hdr: back to SDR after 3 seconds
+
     // the system may switch the output onto (or off) its VRR link at any time
     if (m_videoOutLogged)
     {

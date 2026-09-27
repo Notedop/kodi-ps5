@@ -15,10 +15,233 @@ root = Path(sys.argv[1])
 
 RUNTIME = "src/platform/ps5_agc_native_runtime.c"
 SCREEN = "src/gallium/ps5/ps5_screen.c"
+EGL = "src/egl/ps5_egl.c"
 
 # (file, anchor, text inserted after the anchor)
 ADDITIONS = [
     (RUNTIME, 'static int runtime_video_handle = -1;\n', '\n/* KODI-PS5: video out handle once presentation has opened it (-1 before). */\nint ps5_opengl_video_out_handle(void);\nint ps5_opengl_video_out_handle(void)\n{\n    return runtime_video_handle;\n}\n'),
+]
+
+# HDR output (optional): re-register the scanout buffers with another pixel
+# format - the HDR 10-bit BT.2020 PQ format (0x8100070422000000, as
+# ProsperoLight registers it) or back to the driver's SDR one. Both formats are
+# 32 bits per pixel, so the buffers stay the same memory.
+HDR = [
+    (RUNTIME, None, """
+/* KODI-PS5: switch the scanout buffers' pixel format (HDR output). Waits for
+ * pending flips, unregisters buffer set 0 and registers the same two buffers
+ * with the new format; if that is refused, the previous format is registered
+ * again. Returns the registration result for the requested format. */
+int ps5_opengl_set_scanout_format(uint64_t pixel_format);
+#if defined(AGC_RUNTIME_PACKAGES) /* the runtime's video state lives in this build only */
+int
+ps5_opengl_set_scanout_format(uint64_t pixel_format)
+{
+    static uint64_t current = VIDEO_OUT_PIXEL_FORMAT;
+    if (!runtime_video_registered || runtime_video_handle < 0 || !runtime_video_framebuffer ||
+        !runtime_video_api.unregister_buffers || !runtime_video_api.register_buffers2 ||
+        !runtime_video_api.set_attribute2)
+        return -1;
+    if (pixel_format == current)
+        return 0;
+    for (int i = 0; i < 200 && runtime_video_api.is_flip_pending &&
+                    runtime_video_api.is_flip_pending(runtime_video_handle) > 0; ++i)
+        sceKernelUsleep(1000);
+    uint8_t *framebuffer = runtime_video_framebuffer;
+    video_buffer_t buffers[2] = {
+        {framebuffer, NULL, NULL, NULL},
+        {framebuffer + (runtime_video_framebuffer_size >= FRAMEBUFFER_POOL_BYTES
+                            ? FRAMEBUFFER_BYTES : 0),
+         NULL, NULL, NULL}
+    };
+    const int unregister_rc = runtime_video_api.unregister_buffers(runtime_video_handle, 0);
+    video_attribute_t attribute = {{0}};
+    runtime_video_api.set_attribute2(&attribute, pixel_format, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+                                     0, 0, 0);
+    const int register_rc = runtime_video_api.register_buffers2(runtime_video_handle, 0, 0,
+                                                                buffers, 2, &attribute, 0, NULL);
+    int restore_rc = 0;
+    if (register_rc != 0) {
+        video_attribute_t previous = {{0}};
+        runtime_video_api.set_attribute2(&previous, current, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+                                         0, 0, 0);
+        restore_rc = runtime_video_api.register_buffers2(runtime_video_handle, 0, 0, buffers, 2,
+                                                         &previous, 0, NULL);
+    } else {
+        current = pixel_format;
+    }
+    printf("[kodi-ps5] scanout format %016llx: unregister=%08x register=%08x restore=%08x\n",
+           (unsigned long long)pixel_format, (uint32_t)unregister_rc, (uint32_t)register_rc,
+           (uint32_t)restore_rc);
+    return register_rc;
+}
+#else
+int
+ps5_opengl_set_scanout_format(uint64_t pixel_format)
+{
+    (void)pixel_format;
+    return -1;
+}
+#endif
+""", "append"),
+]
+
+# Zero-copy video (optional: skipped, with a note, if a revision differs).
+# A sampled 2D texture over memory the driver does not own (the hardware video
+# decoder's frames), handed to GL as an EGL image; see the Kodi renderer
+# xbmc/platform/ps5/video/RendererPS5.cpp. (file, anchor, text, where)
+ZERO_COPY = [
+    (SCREEN, "   unsigned render_arena_slot_count;\n",
+     "   bool kodi_foreign_memory; /* KODI-PS5: memory owned by someone else (zero-copy video) */\n",
+     "after"),
+    (SCREEN, "   simple_mtx_unlock(&ps5->resource_mutex);\n   ps5_release_resource_memory(resource->stencil_data,\n",
+     """   if (resource->kodi_foreign_memory) { /* KODI-PS5: not ours to unmap */
+      resource->data = NULL;
+      resource->allocation_size = 0;
+      resource->direct_start = -1;
+   }
+""", "before"),
+    (SCREEN, "   uint64_t *epoch = stencil ? &texture->stencil_publication_epoch : &texture->texture_publication_epoch;\n",
+     """   /* KODI-PS5: foreign memory is written by the video decoder, not the CPU:
+    * nothing to flush out of the CPU's caches. */
+   if (texture->kodi_foreign_memory)
+      return;
+""", "before"),
+    (SCREEN, None, """
+/* KODI-PS5: a sampled, linear 2D texture over existing GPU-visible memory
+ * (zero-copy video). The row pitch must be what the driver itself would use
+ * for a linear texture of that width. */
+struct pipe_resource *ps5_kodi_resource_from_memory(struct pipe_screen *screen,
+                                                    enum pipe_format format,
+                                                    unsigned width, unsigned height,
+                                                    unsigned stride, void *data);
+struct pipe_resource *
+ps5_kodi_resource_from_memory(struct pipe_screen *screen, enum pipe_format format,
+                              unsigned width, unsigned height, unsigned stride, void *data)
+{
+   const unsigned format_size = ps5_texture_format_size(format);
+   if (!screen || !data || !format_size || !width || !height ||
+       stride != ((format_size * width + 255u) & ~255u) || ((uintptr_t)data & 255u))
+      return NULL;
+   struct ps5_resource *resource = calloc(1, sizeof(*resource));
+   if (!resource)
+      return NULL;
+   resource->base.target = PIPE_TEXTURE_2D;
+   resource->base.format = format;
+   resource->base.width0 = width;
+   resource->base.height0 = (uint16_t)height;
+   resource->base.depth0 = 1;
+   resource->base.array_size = 1;
+   resource->base.last_level = 0;
+   resource->base.bind = PIPE_BIND_SAMPLER_VIEW;
+   resource->base.usage = PIPE_USAGE_DEFAULT;
+   resource->base.reference.count = 1;
+   resource->base.screen = screen;
+   resource->data = data;
+   resource->size = resource->allocation_size = (size_t)stride * height;
+   resource->stride = stride;
+   resource->level_stride[0] = stride;
+   resource->level_offset[0] = 0;
+   resource->layer_stride = resource->size;
+   resource->direct_start = -1;
+   resource->stencil_direct_start = -1;
+   resource->kodi_foreign_memory = true;
+   return &resource->base;
+}
+""", "append"),
+    (EGL, "struct ps5_egl_config {\n",
+     """/* KODI-PS5: EGL images over existing memory (zero-copy video) */
+static bool ps5_kodi_validate_egl_image(struct pipe_frontend_screen *fscreen, void *image);
+static bool ps5_kodi_get_egl_image(struct pipe_frontend_screen *fscreen, void *image,
+                                   struct st_egl_image *out);
+
+""", "before"),
+    (EGL, "      ps5_display.frontend.set_background_context = ps5_background_context;\n",
+     """      ps5_display.frontend.validate_egl_image = ps5_kodi_validate_egl_image; /* KODI-PS5 */
+      ps5_display.frontend.get_egl_image = ps5_kodi_get_egl_image;
+""", "after"),
+    (EGL, None, """
+/* KODI-PS5: EGL images over existing memory, for Kodi's zero-copy video. The
+ * image handle is passed to glEGLImageTargetTexture2DOES; Mesa asks these
+ * hooks for the resource behind it. */
+#define PS5_KODI_IMAGE_MAGIC 0x4b4f4449u
+struct ps5_kodi_image {
+   uint32_t magic;
+   struct pipe_resource *resource;
+};
+struct pipe_resource *ps5_kodi_resource_from_memory(struct pipe_screen *screen,
+                                                    enum pipe_format format,
+                                                    unsigned width, unsigned height,
+                                                    unsigned stride, void *data);
+
+static bool
+ps5_kodi_validate_egl_image(struct pipe_frontend_screen *fscreen, void *image)
+{
+   (void)fscreen;
+   const struct ps5_kodi_image *img = image;
+   return img && img->magic == PS5_KODI_IMAGE_MAGIC && img->resource;
+}
+
+static bool
+ps5_kodi_get_egl_image(struct pipe_frontend_screen *fscreen, void *image,
+                       struct st_egl_image *out)
+{
+   if (!ps5_kodi_validate_egl_image(fscreen, image))
+      return false;
+   const struct ps5_kodi_image *img = image;
+   memset(out, 0, sizeof(*out));
+   pipe_resource_reference(&out->texture, img->resource);
+   out->format = img->resource->format;
+   out->level = 0;
+   out->layer = 0;
+   return true;
+}
+
+/* components 1 or 2, bytes per component 1 or 2: R8, RG8, R16, RG16 */
+void *ps5_opengl_memory_image_create(void *data, unsigned width, unsigned height,
+                                     unsigned stride, unsigned components,
+                                     unsigned bytes_per_component);
+void *
+ps5_opengl_memory_image_create(void *data, unsigned width, unsigned height, unsigned stride,
+                               unsigned components, unsigned bytes_per_component)
+{
+   enum pipe_format format = PIPE_FORMAT_NONE;
+   if (components == 1 && bytes_per_component == 1)
+      format = PIPE_FORMAT_R8_UNORM;
+   else if (components == 2 && bytes_per_component == 1)
+      format = PIPE_FORMAT_R8G8_UNORM;
+   else if (components == 1 && bytes_per_component == 2)
+      format = PIPE_FORMAT_R16_UNORM;
+   else if (components == 2 && bytes_per_component == 2)
+      format = PIPE_FORMAT_R16G16_UNORM;
+   if (format == PIPE_FORMAT_NONE || !ps5_display.screen)
+      return NULL;
+   struct pipe_resource *resource = ps5_kodi_resource_from_memory(
+      ps5_display.screen, format, width, height, stride, data);
+   if (!resource)
+      return NULL;
+   struct ps5_kodi_image *img = calloc(1, sizeof(*img));
+   if (!img) {
+      pipe_resource_reference(&resource, NULL);
+      return NULL;
+   }
+   img->magic = PS5_KODI_IMAGE_MAGIC;
+   img->resource = resource;
+   return img;
+}
+
+void ps5_opengl_memory_image_destroy(void *image);
+void
+ps5_opengl_memory_image_destroy(void *image)
+{
+   struct ps5_kodi_image *img = image;
+   if (!img || img->magic != PS5_KODI_IMAGE_MAGIC)
+      return;
+   img->magic = 0;
+   pipe_resource_reference(&img->resource, NULL);
+   free(img);
+}
+""", "append"),
 ]
 
 # Texts earlier versions inserted; removed when present.
@@ -54,6 +277,24 @@ for rel, anchor, text in ADDITIONS:
         continue
     path.write_text(source.replace(anchor, anchor + text, 1))
     print(f"  {rel}: applied (video out handle export)")
+
+for rel, anchor, text, where in HDR + ZERO_COPY:
+    path = root / rel
+    source = path.read_text()
+    label = text.strip().splitlines()[0][:64]
+    if text.strip() in source:
+        print(f"  {rel}: already applied ({label})")
+        continue
+    if where == "append":
+        path.write_text(source.rstrip("\n") + "\n" + text)
+        print(f"  {rel}: applied ({label})")
+        continue
+    if source.count(anchor) != 1:
+        print(f"  {rel}: skipped, anchor differs in this revision ({label}) - zero-copy unavailable")
+        continue
+    replacement = anchor + text if where == "after" else text + anchor
+    path.write_text(source.replace(anchor, replacement, 1))
+    print(f"  {rel}: applied ({label})")
 
 leftover = [t for rel, t in REMOVED if t in (root / rel).read_text()]
 if "KODI-PS5: profiler" in (root / SCREEN).read_text() or leftover:

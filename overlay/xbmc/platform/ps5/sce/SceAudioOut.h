@@ -32,6 +32,8 @@ extern "C"
                           uint32_t freq,
                           uint32_t param);
   int32_t sceAudioOutOutput(int32_t handle, const void* buffer);
+  // flag: one bit per channel (L, R, C, LFE, LS, RS, LE, RE); vol: 8 entries
+  int32_t sceAudioOutSetVolume(int32_t handle, int32_t flag, int32_t* vol);
   int32_t sceAudioOutClose(int32_t handle);
 }
 
@@ -50,7 +52,15 @@ constexpr uint32_t AUDIO_OUT_FORMAT_S16_8CH = 2;
 constexpr uint32_t AUDIO_OUT_FORMAT_FLOAT_MONO = 3;
 constexpr uint32_t AUDIO_OUT_FORMAT_FLOAT_STEREO = 4;
 constexpr uint32_t AUDIO_OUT_FORMAT_FLOAT_8CH = 5;
+// 8 channels: plain = FL FR FC LFE BL BR SL SR; _STD = FL FR FC LFE SL SR BL BR
+// (channel orders as documented by the shadPS4 project)
+constexpr uint32_t AUDIO_OUT_FORMAT_S16_8CH_STD = 6;
+constexpr uint32_t AUDIO_OUT_FORMAT_FLOAT_8CH_STD = 7;
 
 constexpr uint32_t AUDIO_OUT_SAMPLE_RATE = 48000;
+// the other rate the port accepts (BlackBearReloaded's audio research)
+constexpr uint32_t AUDIO_OUT_SAMPLE_RATE_HIGH = 192000;
+constexpr int32_t AUDIO_OUT_VOLUME_0DB = 0x8000;
+constexpr int32_t AUDIO_OUT_VOLUME_ALL_CHANNELS = 0xff;
 
 } // namespace KODI::PLATFORM::PS5

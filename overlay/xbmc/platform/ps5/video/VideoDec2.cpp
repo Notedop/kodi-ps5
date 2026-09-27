@@ -10,7 +10,9 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <string>
 
 #include <sys/mman.h>
 
@@ -113,6 +115,9 @@ namespace
 constexpr uint32_t kSysmoduleVideodec2 = 207;
 constexpr uint32_t kCodecH264 = 1;
 constexpr uint32_t kCodecHEVC = 0x000ee049;
+// VP9: the value the prosper project maps to VP9 (console-proven VP9 decode:
+// BlackBearReloaded's ps5-hardware-video-decoding-research, EVO Player)
+constexpr uint32_t kCodecVP9 = 2382845;
 constexpr int kMemoryType = 12;       // direct memory type used on hardware
 constexpr int kProtGpu = 0x32;        // CPU read/write + GPU read/write
 constexpr int kProtCpuGpu = 0x33;
@@ -194,11 +199,15 @@ void CVideoDec2::FreeDirect(DirectMemory& mem)
   mem = DirectMemory{};
 }
 
-bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& error)
+bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& error,
+                     bool interlaced)
 {
   Close();
   const bool uhd = width > 1920 || height > 1088;
-  m_codecType = codec == VideoDec2Codec::H264 ? kCodecH264 : kCodecHEVC;
+  const bool vp9 = codec == VideoDec2Codec::VP9 || codec == VideoDec2Codec::VP9Profile2;
+  m_codecType = codec == VideoDec2Codec::H264 ? kCodecH264 : (vp9 ? kCodecVP9 : kCodecHEVC);
+  m_tenBit = codec == VideoDec2Codec::HEVCMain10 || codec == VideoDec2Codec::VP9Profile2;
+  m_formatLogged = false;
 
   int32_t rc = sceSysmoduleLoadModule(kSysmoduleVideodec2);
   if (rc < 0)
@@ -231,6 +240,50 @@ bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& 
     return false;
   }
 
+  // kodi-probe-codecs: once, which codec types the decoder's memory query
+  // accepts (H.264 = 1 and HEVC = 0xee049 are the controls)
+  static bool codecsProbed = false;
+  if (!codecsProbed && getenv("KODI_PS5_PROBE_CODECS"))
+  {
+    codecsProbed = true;
+    std::string accepted;
+    auto probe = [&](uint32_t type)
+    {
+      sceVideodec2DecoderConfig probeConfig{};
+      probeConfig.size = sizeof(probeConfig);
+      probeConfig.resourceType = 1;
+      probeConfig.codecType = type;
+      probeConfig.maxWidth = 1920;
+      probeConfig.maxHeight = 1088;
+      probeConfig.maxDpbFrames = 16;
+      probeConfig.pipelineDepth = 1;
+      probeConfig.computeQueue = reinterpret_cast<uint64_t>(m_computeQueue);
+      probeConfig.cpuAffinity = 0x3f;
+      probeConfig.cpuPriority = 700;
+      probeConfig.optimizeProgressive = 1;
+      sceVideodec2DecoderMemory probeMemory{};
+      probeMemory.size = sizeof(probeMemory);
+      const int32_t probeRc = sceVideodec2QueryDecoderMemoryInfo(&probeConfig, &probeMemory);
+      if (probeRc == 0)
+      {
+        char entry[64];
+        snprintf(entry, sizeof(entry), " %#x", type);
+        accepted += entry;
+      }
+      return probeRc;
+    };
+    const int32_t h264Rc = probe(kCodecH264);
+    const int32_t hevcRc = probe(kCodecHEVC);
+    accepted.clear();
+    for (uint32_t type = 0; type < 64; ++type)
+      probe(type);
+    for (uint32_t type = 0x000ee040; type < 0x000ee060; ++type)
+      probe(type);
+    Log("[kodi-ps5] videodec2 codec probe: controls H.264 %#x, HEVC %#x; accepted codec types:%s\n",
+        static_cast<uint32_t>(h264Rc), static_cast<uint32_t>(hevcRc),
+        accepted.empty() ? " none" : accepted.c_str());
+  }
+
   // decoder: sized for 1080p or 2160p streams, with a full-size DPB for files
   sceVideodec2DecoderConfig config{};
   config.size = sizeof(config);
@@ -241,30 +294,64 @@ bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& 
     config.profile = 100; // High (covers Baseline/Main)
     config.maxLevel = uhd ? 52 : 51;
   }
+  else if (vp9)
+  {
+    config.profile = m_tenBit ? 2 : 0; // VP9 profile
+    config.maxLevel = uhd ? 51 : 41;   // first candidate; see the query below
+  }
   else
   {
-    config.profile = 1; // Main
+    config.profile = m_tenBit ? 2 : 1; // HEVC profile_idc: Main 10 / Main
     config.maxLevel = uhd ? 153 : 123;
   }
   config.maxWidth = uhd ? 3840 : 1920;
-  config.maxHeight = uhd ? 2176 : 1088;
+  // VP9 surfaces are exactly the frame size (the research's proven modes)
+  config.maxHeight = vp9 ? (uhd ? 2160 : 1080) : (uhd ? 2176 : 1088);
   config.maxDpbFrames = 16;
   config.pipelineDepth = 1;
   config.computeQueue = reinterpret_cast<uint64_t>(m_computeQueue);
   config.cpuAffinity = 0x3f;
   config.cpuPriority = 700;
-  config.optimizeProgressive = 1;
+  config.optimizeProgressive = interlaced ? 0 : 1; // interlaced: probe (kodi-hw-interlaced)
 
   sceVideodec2DecoderMemory memory{};
   memory.size = sizeof(memory);
   rc = sceVideodec2QueryDecoderMemoryInfo(&config, &memory);
+  if (rc != 0 && vp9)
+  {
+    // VP9's level numbering and reference-frame budget are not documented:
+    // take the first combination the decoder accepts, and say which
+    const uint32_t levels[] = {uhd ? 51u : 41u, uhd ? 153u : 123u, 0u};
+    const int32_t dpbs[] = {16, 8, 4};
+    for (const int32_t dpb : dpbs)
+    {
+      for (const uint32_t level : levels)
+      {
+        config.maxLevel = level;
+        config.maxDpbFrames = dpb;
+        memory = {};
+        memory.size = sizeof(memory);
+        rc = sceVideodec2QueryDecoderMemoryInfo(&config, &memory);
+        if (rc == 0)
+          break;
+      }
+      if (rc == 0)
+        break;
+    }
+  }
   if (rc != 0)
   {
     error = Hex("sceVideodec2QueryDecoderMemoryInfo", rc);
     return false;
   }
+  if (vp9)
+    Log("[kodi-ps5] videodec2: VP9 profile %u accepted with level %u, %d reference frames\n",
+        config.profile, config.maxLevel, config.maxDpbFrames);
   Log("[kodi-ps5] videodec2: %s %dx%d needs cpu=%llx gpu=%llx shared=%llx frame=%llx\n",
-      codec == VideoDec2Codec::H264 ? "H.264" : "HEVC", config.maxWidth, config.maxHeight,
+      codec == VideoDec2Codec::H264
+          ? "H.264"
+          : (vp9 ? (m_tenBit ? "VP9 Profile 2" : "VP9") : (m_tenBit ? "HEVC Main10" : "HEVC")),
+      config.maxWidth, config.maxHeight,
       static_cast<unsigned long long>(memory.cpuSize),
       static_cast<unsigned long long>(memory.gpuSize),
       static_cast<unsigned long long>(memory.cpuGpuSize),
@@ -340,16 +427,66 @@ void CVideoDec2::Close()
   m_cpuWorkspace = nullptr;
   m_cpuWorkspaceSize = 0;
   m_nextFrame = 0;
+  std::lock_guard<std::mutex> lock(m_frameMutex);
+  for (auto& state : m_frameState)
+    state = FrameState::Free;
 }
 
-uint8_t* CVideoDec2::NextFrameBuffer()
+uint8_t* CVideoDec2::NextFrameBuffer(int& index)
 {
-  uint8_t* buffer = static_cast<uint8_t*>(m_frameMemory.address) + m_nextFrame * m_frameSize;
-  m_nextFrame = (m_nextFrame + 1) % kFrameBuffers;
-  return buffer;
+  uint8_t* base = static_cast<uint8_t*>(m_frameMemory.address);
+  if (!m_pooled)
+  {
+    // ring: every frame is overwritten kFrameBuffers decodes later
+    index = static_cast<int>(m_nextFrame);
+    m_nextFrame = (m_nextFrame + 1) % kFrameBuffers;
+    return base + static_cast<size_t>(index) * m_frameSize;
+  }
+  std::lock_guard<std::mutex> lock(m_frameMutex);
+  for (unsigned n = 0; n < kFrameBuffers; ++n)
+  {
+    const unsigned i = (m_nextFrame + n) % kFrameBuffers;
+    if (m_frameState[i] == FrameState::Free)
+    {
+      m_nextFrame = (i + 1) % kFrameBuffers;
+      index = static_cast<int>(i);
+      return base + static_cast<size_t>(i) * m_frameSize;
+    }
+  }
+  index = -1;
+  return nullptr;
 }
 
-bool CVideoDec2::ToPicture(const void* out, VideoDec2Picture* picture) const
+int CVideoDec2::FrameIndexOf(const void* buffer) const
+{
+  const auto* base = static_cast<const uint8_t*>(m_frameMemory.address);
+  const auto* buf = static_cast<const uint8_t*>(buffer);
+  if (!base || buf < base || buf >= base + m_frameSize * kFrameBuffers)
+    return -1;
+  return static_cast<int>(static_cast<size_t>(buf - base) / m_frameSize);
+}
+
+bool CVideoDec2::HasFreeFrame() const
+{
+  if (!m_pooled)
+    return true;
+  std::lock_guard<std::mutex> lock(m_frameMutex);
+  for (const auto& state : m_frameState)
+    if (state == FrameState::Free)
+      return true;
+  return false;
+}
+
+void CVideoDec2::ReleaseFrame(int index)
+{
+  if (index < 0 || index >= static_cast<int>(kFrameBuffers))
+    return;
+  std::lock_guard<std::mutex> lock(m_frameMutex);
+  if (m_frameState[index] == FrameState::Kodi)
+    m_frameState[index] = FrameState::Free;
+}
+
+bool CVideoDec2::ToPicture(const void* out, VideoDec2Picture* picture)
 {
   const auto* output = static_cast<const sceVideodec2Output*>(out);
   if (!output->valid || output->error || !output->buffer || output->pitch == 0)
@@ -358,11 +495,30 @@ bool CVideoDec2::ToPicture(const void* out, VideoDec2Picture* picture) const
   const auto* buf = static_cast<const uint8_t*>(output->buffer);
   if (buf < base || buf >= base + m_frameSize * kFrameBuffers)
     return false; // not one of ours
+  // Bytes per row: for 8-bit NV12 the pitch; for 10-bit (16 bits per
+  // sample) the decoder's byte pitch, or twice the pitch if it gives none.
+  const uint32_t rowBytes =
+      m_tenBit ? (output->pitchBytes ? output->pitchBytes : output->pitch * 2) : output->pitch;
+  if (!m_formatLogged)
+  {
+    m_formatLogged = true;
+    Log("[kodi-ps5] videodec2: first picture %ux%u, frameFormat %u, pitch %u, pitchBytes %u, "
+        "pictureCount %u -> %u bytes per row (%s)\n",
+        output->width, output->height, output->frameFormat, output->pitch, output->pitchBytes,
+        output->pictureCount, rowBytes, m_tenBit ? "10-bit" : "8-bit NV12");
+  }
+  picture->frameIndex = FrameIndexOf(buf);
+  if (m_pooled && picture->frameIndex >= 0)
+  {
+    std::lock_guard<std::mutex> lock(m_frameMutex);
+    m_frameState[picture->frameIndex] = FrameState::Kodi;
+  }
   picture->data = buf;
   picture->width = output->width;
   picture->height = output->height;
-  picture->pitch = output->pitch;
-  InvalidateForRead(buf, static_cast<size_t>(output->pitch) * output->height * 3 / 2);
+  picture->pitch = rowBytes;
+  picture->bitDepth = m_tenBit ? 10 : 8;
+  InvalidateForRead(buf, static_cast<size_t>(rowBytes) * output->height * 3 / 2);
   return true;
 }
 
@@ -380,6 +536,30 @@ bool CVideoDec2::Decode(const uint8_t* au, size_t size, bool& gotPicture,
     error = "access unit too large";
     return false;
   }
+  m_stalled = false;
+  int frameIndex = -1;
+  uint8_t* frameBuffer = NextFrameBuffer(frameIndex);
+  if (!frameBuffer)
+  {
+    m_stalled = true; // pooled: every frame is held; Kodi releases some first
+    // If Kodi holds none of them, the decoder kept every frame it was offered
+    // without returning pictures: worth knowing, once.
+    static bool warned = false;
+    if (!warned)
+    {
+      std::lock_guard<std::mutex> lock(m_frameMutex);
+      unsigned kodi = 0;
+      for (const auto& state : m_frameState)
+        kodi += state == FrameState::Kodi;
+      if (kodi == 0)
+      {
+        warned = true;
+        Log("[kodi-ps5] videodec2: all %u frames are with the decoder and none with Kodi: "
+            "the decoder is not returning pictures\n", kFrameBuffers);
+      }
+    }
+    return true;
+  }
   std::memcpy(m_inputMemory.address, au, size);
 
   sceVideodec2Input input{};
@@ -390,12 +570,17 @@ bool CVideoDec2::Decode(const uint8_t* au, size_t size, bool& gotPicture,
   input.dts = UINT64_MAX;
   sceVideodec2Frame frame{};
   frame.size = sizeof(frame);
-  frame.buffer = NextFrameBuffer();
+  frame.buffer = frameBuffer;
   frame.bufferSize = m_frameSize;
   sceVideodec2Output output{};
   output.size = sizeof(output);
 
   const int32_t rc = sceVideodec2Decode(m_decoder, &input, &frame, &output);
+  if (m_pooled && frame.accepted)
+  {
+    std::lock_guard<std::mutex> lock(m_frameMutex);
+    m_frameState[frameIndex] = FrameState::Decoder;
+  }
   if (rc != 0 || output.error)
   {
     error = rc != 0 ? Hex("sceVideodec2Decode", rc) : "decoder reported a stream error";
@@ -409,14 +594,23 @@ bool CVideoDec2::Flush(VideoDec2Picture* picture)
 {
   if (!m_decoder)
     return false;
+  int frameIndex = -1;
+  uint8_t* frameBuffer = NextFrameBuffer(frameIndex);
+  if (!frameBuffer)
+    return false;
   sceVideodec2Frame frame{};
   frame.size = sizeof(frame);
-  frame.buffer = NextFrameBuffer();
+  frame.buffer = frameBuffer;
   frame.bufferSize = m_frameSize;
   sceVideodec2Output output{};
   output.size = sizeof(output);
   if (sceVideodec2Flush(m_decoder, &frame, &output) != 0)
     return false;
+  if (m_pooled && frame.accepted)
+  {
+    std::lock_guard<std::mutex> lock(m_frameMutex);
+    m_frameState[frameIndex] = FrameState::Decoder;
+  }
   return ToPicture(&output, picture);
 }
 
@@ -424,6 +618,12 @@ void CVideoDec2::Reset()
 {
   if (m_decoder)
     sceVideodec2Reset(m_decoder);
+  // the decoder lets go of every frame it held; Kodi's pictures stay Kodi's
+  std::lock_guard<std::mutex> lock(m_frameMutex);
+  for (auto& state : m_frameState)
+    if (state == FrameState::Decoder)
+      state = FrameState::Free;
+  m_stalled = false;
 }
 
 } // namespace KODI::PLATFORM::PS5
