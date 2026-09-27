@@ -28,8 +28,8 @@ working on 4.03 (ItemzFlow + etaHEN 2.3b).
 | VRR during playback, matched to the video's frame rate (see *Display*) | VRR with the PS5's VRR setting off |
 | *Sync playback to display* on a fixed 59.94 Hz output | The player debug overlay (L3) during VRR raises the rate to ~120 Hz |
 | DualSense navigation (as keyboard events) | Internet access via curl (add-on repository, online streams) |
-| Audio (UI sounds, playback) | Python add-ons (Python is not built yet) |
-| Video playback in hardware (VideoDec2): H.264 (8-bit), HEVC Main and **HEVC Main 10** (x265 10-bit, HDR10), and, with `kodi-hw-vp9`, **VP9 Profile 0 and 2** (8/10-bit WebM); everything else in FFmpeg | Binary add-ons (no `dlopen` in a title) |
+| Audio: 5.1/7.1 PCM to the system port (48 kHz, 8 channels), Dolby/DTS passthrough offered to Kodi's *Allow passthrough* | Python add-ons (Python is not built yet) |
+| Video playback in hardware (VideoDec2): H.264 (8-bit), HEVC Main and **HEVC Main 10** (x265 10-bit, HDR10), **VP9 Profile 0 and 2** (8/10-bit WebM), shown zero-copy (the GPU reads the decoder's frames directly); interlaced streams deinterlaced with bwdif; everything else in FFmpeg, including **AV1** (dav1d; Dolby Vision profile 10 files are AV1) | Binary add-ons (no `dlopen` in a title) |
 | SMB2/3 and NFS network sources, UPnP | Listing under the Media tab (the GL driver fails in that sandbox) |
 | Thumbnails, databases, settings | Network browsing of `smb://` (enter the server's IP) |
 
@@ -82,7 +82,7 @@ and the scripts that set up the cross toolchain, configure, build and package.
 | Piece | What it does |
 | --- | --- |
 | Graphics | OpenGL 4.6 Core via ps5-opengl's Mesa/Gallium build; EGL default display |
-| Audio | `AESinkPS5`: 48 kHz stereo on the system audio port; the blocking write is the clock |
+| Audio | `AESinkPS5`: 48 kHz, 2 or 8 channels (5.1/7.1 remapped by Kodi; the PS5 downmixes to what the display or receiver takes) on the system audio port; the blocking write is the clock. Passthrough = IEC 61937 in 16-bit stereo PCM at 48/192 kHz, which needs the PS5's *Audio Format* at Linear PCM and a bit-exact path |
 | Input | `PS5PadInput`: DualSense polled at 125 Hz, mapped to Kodi keyboard events |
 | Network sources | `smb://` on libsmb2 (`xbmc/platform/ps5/filesystem`), NFS on libnfs, UPnP |
 | Video decoding | `CDVDVideoCodecPS5` on the hardware decoder (libSceVideodec2, `xbmc/platform/ps5/video`), NV12 into Kodi's GL renderer |
@@ -119,7 +119,8 @@ bash scripts/11-build-tinyxml.sh         # TinyXML 2.6.2 into the sysroot
 bash scripts/12-build-libuuid-shim.sh    # small libuuid (crossguid) + libprocstat stub (exiv2)
 bash scripts/13-build-brotli.sh          # brotli for Kodi's internal exiv2
 bash scripts/14-sysroot-pc-files.sh      # .pc files pacbrew does not install (sqlite3)
-bash scripts/16-build-ffmpeg.sh          # FFmpeg 7.1 (Kodi needs >= 7.1)
+bash scripts/15-build-dav1d.sh           # dav1d AV1 decoder (needs nasm on the host)
+bash scripts/16-build-ffmpeg.sh          # FFmpeg 7.1 with libdav1d (Kodi needs >= 7.1)
 bash scripts/17-build-sce-stubs.sh       # link stub for libSceVideodec2 (also run by 20 if missing)
 bash scripts/18-build-ps5-opengl.sh      # ps5-opengl SDK with Kodi's additions (patches/ps5-opengl)
 
@@ -156,14 +157,12 @@ processes, so FTP cannot delete Kodi's data — these let Kodi do it:
 | `kodi-uninstall` | wipe Kodi's data and quit; the title folder can then be deleted over FTP |
 | `kodi-debug` | debug-level logging (slower; remove when done) |
 | `kodi-swdecode` | software (FFmpeg) video decoding only, no hardware decoder |
-| `kodi-zerocopy` | *(test)* zero-copy video: the hardware decoder's frames are shown directly, without copying (needs the GL driver built by `scripts/18` with the zero-copy additions) |
-| `kodi-hw-interlaced` | *(test)* interlaced streams (1080i TV recordings) to the hardware decoder, deinterlaced with FFmpeg's bwdif: one progressive picture per field |
-| `kodi-multichannel` | *(test)* 8-channel audio output: 5.1/7.1 tracks keep their channels (set Kodi's *Settings → System → Audio → Number of channels* to 5.1 or 7.1) |
-| `kodi-multichannel-alt` | *(test)* with `kodi-multichannel`: the other 8-channel order, if side and back speakers come out swapped |
-| `kodi-probe-codecs` | *(test)* at the first video, log which codec types the hardware decoder accepts beyond H.264 and HEVC |
-| `kodi-hw-vp9` | *(test)* VP9 Profile 0/2 in the hardware decoder (superframes split, hidden frames not shown); without it VP9 plays in FFmpeg |
-| `kodi-passthrough` | *(test, **start at low volume**)* Dolby Digital, Dolby Digital Plus and DTS to an AV receiver as IEC 61937 inside PCM (PS5 *Audio Format*: Linear PCM; Kodi: *Allow passthrough*). Works only if the PS5 passes PCM through bit-exactly; otherwise the receiver plays the packets as loud noise |
-| `kodi-probe-hdr` | *(test)* at start-up, check whether the PS5 accepts an HDR output mode from Kodi, then switch the scanout buffers to the HDR format for 3 seconds (the TV should report HDR; the picture is wrong meanwhile) and log the results |
+| `kodi-no-zerocopy` | show video through the copying path instead of zero-copy (troubleshooting: flicker, black video) |
+| `kodi-stereo-only` | a 2-channel audio port and no passthrough offered (the default is 8 channels, with Dolby/DTS passthrough available to Kodi's *Allow passthrough* setting) |
+| `kodi-multichannel-alt` | the other 8-channel order, if side and back speakers come out swapped |
+| `kodi-hw-pipeline2` | *(experiment)* hardware decoder with two frames in flight, for 4K60 VP9/HEVC that stutters at the default depth of one; `kodi-debug` logs decode times every 5 seconds |
+| `kodi-probe-codecs` | *(probe)* at the first video, log which codec types the hardware decoder accepts beyond H.264, HEVC and VP9 |
+| `kodi-probe-hdr` | *(probe)* at start-up, check whether the PS5 accepts an HDR output mode from Kodi, then switch the scanout buffers to the HDR format for 3 seconds (the TV should report HDR; the picture is wrong meanwhile) and log the results |
 
 ### Adding network sources
 

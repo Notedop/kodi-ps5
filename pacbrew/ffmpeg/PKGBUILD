@@ -5,7 +5,7 @@
 # pacman by scripts/16-build-ffmpeg.sh so it upgrades the pacbrew package.
 pkgname=ps5-payload-ffmpeg
 pkgver=7.1.1
-pkgrel=2
+pkgrel=3
 pkgdesc='Complete solution to record, convert and stream audio and video'
 arch=('any')
 url='https://ffmpeg.org'
@@ -16,7 +16,7 @@ sha256sums=('SKIP')
 groups=('ps5-payload-dev')
 depends=('ps5-payload-zlib' 'ps5-payload-openssl' 'ps5-payload-freetype'
 	 'ps5-payload-libfribidi' 'ps5-payload-harfbuzz' 'ps5-payload-libass'
-	 'ps5-payload-libx264')
+	 'ps5-payload-libx264' 'ps5-payload-dav1d')
 makedepends=('ps5-payload-sdk')
 
 build() {
@@ -31,7 +31,7 @@ build() {
 	--enable-libfreetype --enable-libfribidi --enable-libharfbuzz \
 	--enable-gpl --enable-libx264 \
 	--disable-debug --disable-doc --disable-programs \
-	--enable-libass \
+	--enable-libass --enable-libdav1d \
 	--cc="${CC}" --cxx="${CXX}" --nm="${NM}" --strip="${STRIP}" \
 	--ar="${AR}" --ranlib="${RANLIB}" --pkg-config="${PKG_CONFIG}"
     ${MAKE}

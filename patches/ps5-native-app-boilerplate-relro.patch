@@ -2,7 +2,9 @@ RELRO segment written at the GOT's file offset instead of the segment start,
 producing a LOAD program header whose file offset is not congruent with its
 address modulo the 16 KiB page size. The PS5 loader rejects the title
 (CE-107750-0). Fix taken from the writer vendored in blackbearreloaded/ProsperoLight,
-which is hardware-verified; boilerplate main (722f222) lacks it.
+which is hardware-verified; boilerplate main (722f222) lacked it. Upstream fixed
+it in 81d4235 (relro_origin), so this patch only applies to older checkouts
+(scripts/00-setup-wsl.sh checks first).
 
 --- a/tooling/native/sce_module_writer.cpp	2026-09-25 13:28:19.650008179 +0000
 +++ b/tooling/native/sce_module_writer.cpp	2026-09-25 13:28:19.651242356 +0000

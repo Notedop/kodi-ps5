@@ -73,19 +73,24 @@ fi
 export PATH="$HOME/.local/bin:$PATH"
 
 # The native-app boilerplate supplies the ELF -> folder-title tooling that the
-# imgui-demo uses (and that Kodi's deploy step reuses). ps5-opengl pins a
-# boilerplate commit; that commit is no longer in the boilerplate's history, so
-# fall back to main when the checkout fails.
+# imgui-demo uses (and that Kodi's deploy step reuses). ps5-opengl's pinned
+# boilerplate commit is no longer in upstream history; the next best is
+# 81d4235 (the RELRO fix, same build layout as before). Newer main restructured
+# the build (Ninja), which the tooling here has not been validated against.
 if [ ! -d "$WORK/ps5-native-app-boilerplate" ]; then
   git clone https://github.com/blackbearreloaded/ps5-native-app-boilerplate.git "$WORK/ps5-native-app-boilerplate"
   ( cd "$WORK/ps5-native-app-boilerplate" \
-      && git checkout -q 4e1d1277dd0531a9a9df8c780e446b9cc26534dd 2>/dev/null \
-      || echo "    pinned boilerplate commit not found upstream; staying on main" )
+      && { git checkout -q 4e1d1277dd0531a9a9df8c780e446b9cc26534dd 2>/dev/null \
+           || git checkout -q 81d4235346afc7490e98866af4020e94f255b204 2>/dev/null \
+           || echo "    known boilerplate commits not found upstream; staying on main"; } )
 fi
-# Boilerplate main writes the RELRO LOAD segment at the wrong file offset and
-# the console refuses the title (CE-107750-0). ProsperoLight carries the fix
-# in its vendored copy of the converter; apply it here (idempotent).
-if ! grep -q "RELRO mapping must begin" "$WORK/ps5-native-app-boilerplate/tooling/native/sce_module_writer.cpp"; then
+# Older boilerplate revisions wrote the RELRO LOAD segment at the wrong file
+# offset and the console refused the title (CE-107750-0). Upstream fixed it in
+# 81d4235 (relro_origin); for revisions before that, apply ProsperoLight's fix.
+WRITER="$WORK/ps5-native-app-boilerplate/tooling/native/sce_module_writer.cpp"
+if grep -q "relro_origin\|RELRO mapping must begin" "$WRITER"; then
+  echo "    boilerplate RELRO fix present"
+else
   ( cd "$WORK/ps5-native-app-boilerplate" \
       && patch -p1 < "$(dirname "${BASH_SOURCE[0]}")/../patches/ps5-native-app-boilerplate-relro.patch" )
 fi

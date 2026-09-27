@@ -13,6 +13,8 @@
 #include "cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h"
 
 #include <deque>
+#include <cstdlib>
+#include <chrono>
 #include <memory>
 #include <set>
 #include <string>
@@ -100,6 +102,13 @@ private:
   // the upper 10 bits (P010) or the lower 10; decided on the first picture.
   bool m_tenBit = false;
   bool m_vp9 = false; // superframes split; hidden frames' outputs not shown
+
+  // kodi-debug: decode time statistics, logged every 5 seconds
+  const bool m_timeDecodes = getenv("KODI_PS5_DEBUG") != nullptr;
+  std::chrono::steady_clock::time_point m_decodeWindow{};
+  double m_decodeTotalMs = 0.0;
+  double m_decodeMaxMs = 0.0;
+  unsigned m_decodeCount = 0;
   bool m_alignmentKnown = false;
   AVPixelFormat m_pixelFormat = AV_PIX_FMT_NV12;
   unsigned m_colorBits = 8;

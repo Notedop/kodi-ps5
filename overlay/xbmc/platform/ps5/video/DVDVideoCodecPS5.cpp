@@ -110,12 +110,11 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
            (hints.profile == AV_PROFILE_HEVC_MAIN_10 ||
             (hints.profile == AV_PROFILE_UNKNOWN && hints.bitsperpixel == 10)))
     codec = VideoDec2Codec::HEVCMain10;
-  // VP9 (kodi-hw-vp9, until confirmed on the console)
-  else if (hints.codec == AV_CODEC_ID_VP9 && getenv("KODI_PS5_HW_VP9") &&
+  else if (hints.codec == AV_CODEC_ID_VP9 &&
            (hints.profile == AV_PROFILE_VP9_0 ||
             (hints.profile == AV_PROFILE_UNKNOWN && hints.bitsperpixel <= 8)))
     codec = VideoDec2Codec::VP9;
-  else if (hints.codec == AV_CODEC_ID_VP9 && getenv("KODI_PS5_HW_VP9") &&
+  else if (hints.codec == AV_CODEC_ID_VP9 &&
            (hints.profile == AV_PROFILE_VP9_2 ||
             (hints.profile == AV_PROFILE_UNKNOWN && hints.bitsperpixel == 10)))
     codec = VideoDec2Codec::VP9Profile2;
@@ -124,23 +123,21 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
 
   if (hints.width <= 0 || hints.height <= 0 || hints.width > 3840 || hints.height > 2176)
     return false;
-  // Interlaced streams go to FFmpeg (which deinterlaces), unless the
-  // kodi-hw-interlaced probe sends them to the hardware decoder.
+  // Interlaced streams: decoded in hardware, deinterlaced with bwdif
   const bool interlaced = hints.interlaced;
-  if (interlaced && !getenv("KODI_PS5_HW_INTERLACED"))
-    return false;
   if (interlaced)
-    CLog::Log(LOGINFO, "CDVDVideoCodecPS5: kodi-hw-interlaced: interlaced {}x{} stream to the "
-              "hardware decoder (no deinterlacing yet)", hints.width, hints.height);
+    CLog::Log(LOGINFO, "CDVDVideoCodecPS5: interlaced {}x{} stream: hardware decode, bwdif",
+              hints.width, hints.height);
 
-  // interlaced (kodi-hw-interlaced): bwdif over the decoded frames, which
-  // needs them in ordinary memory - so no zero-copy for these
+  // interlaced: bwdif over the decoded frames, which needs them in ordinary
+  // memory - so no zero-copy for these
   m_deinterlace = interlaced;
-  // zero-copy (kodi-zerocopy): pictures are the decoder's own frames
-  m_zeroCopy = !interlaced && getenv("KODI_PS5_ZEROCOPY") != nullptr && IsZeroCopyAvailable();
-  if (getenv("KODI_PS5_ZEROCOPY") && !m_zeroCopy)
-    CLog::Log(LOGWARNING, "CDVDVideoCodecPS5: kodi-zerocopy present, but the GL driver has no "
-              "zero-copy additions (rebuild it with scripts/18): copying frames");
+  // zero-copy (the default): pictures are the decoder's own frames;
+  // kodi-no-zerocopy selects the copying path
+  m_zeroCopy = !interlaced && IsZeroCopyAvailable() && !getenv("KODI_PS5_NO_ZEROCOPY");
+  if (!interlaced && !IsZeroCopyAvailable())
+    CLog::Log(LOGWARNING, "CDVDVideoCodecPS5: the GL driver has no zero-copy additions (rebuild "
+              "it with scripts/18): copying frames");
   m_decoder->SetPooled(m_zeroCopy);
   if (m_zeroCopy && !m_zeroCopyPool)
     m_zeroCopyPool = std::make_shared<CVideoBufferPoolPS5>();
@@ -347,6 +344,7 @@ bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
 {
   const bool shown = !m_vp9 || Vp9FrameIsShown(data, size);
   bool gotPicture = false;
+  const auto decodeStart = std::chrono::steady_clock::now();
   VideoDec2Picture picture;
   std::string error;
   if (!m_decoder->Decode(data, size, gotPicture, &picture, error))
@@ -362,6 +360,26 @@ bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
     return false;
   }
   m_errorsInRow = 0;
+  if (m_timeDecodes && !m_decoder->Stalled())
+  {
+    const auto now = std::chrono::steady_clock::now();
+    const double ms = std::chrono::duration<double, std::milli>(now - decodeStart).count();
+    m_decodeTotalMs += ms;
+    m_decodeMaxMs = std::max(m_decodeMaxMs, ms);
+    ++m_decodeCount;
+    if (m_decodeWindow.time_since_epoch().count() == 0)
+      m_decodeWindow = now;
+    else if (now - m_decodeWindow >= std::chrono::seconds(5))
+    {
+      CLog::Log(LOGINFO, "CDVDVideoCodecPS5 (kodi-debug): {} decodes in {:.1f} s, {:.1f} ms average, "
+                "{:.1f} ms longest",
+                m_decodeCount, std::chrono::duration<double>(now - m_decodeWindow).count(),
+                m_decodeTotalMs / m_decodeCount, m_decodeMaxMs);
+      m_decodeWindow = now;
+      m_decodeTotalMs = m_decodeMaxMs = 0.0;
+      m_decodeCount = 0;
+    }
+  }
   if (m_decoder->Stalled())
   {
     // zero-copy: no frame was free; the access unit waits at the front (it is

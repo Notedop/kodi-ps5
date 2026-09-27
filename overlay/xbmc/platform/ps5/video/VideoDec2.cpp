@@ -308,7 +308,9 @@ bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& 
   // VP9 surfaces are exactly the frame size (the research's proven modes)
   config.maxHeight = vp9 ? (uhd ? 2160 : 1080) : (uhd ? 2176 : 1088);
   config.maxDpbFrames = 16;
-  config.pipelineDepth = 1;
+  // kodi-hw-pipeline2: two frames in flight (4K60 VP9 is just over the budget
+  // at depth one); the frame pool copes with the extra output latency
+  config.pipelineDepth = getenv("KODI_PS5_HW_PIPELINE2") ? 2 : 1;
   config.computeQueue = reinterpret_cast<uint64_t>(m_computeQueue);
   config.cpuAffinity = 0x3f;
   config.cpuPriority = 700;
@@ -347,6 +349,8 @@ bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& 
   if (vp9)
     Log("[kodi-ps5] videodec2: VP9 profile %u accepted with level %u, %d reference frames\n",
         config.profile, config.maxLevel, config.maxDpbFrames);
+  if (config.pipelineDepth != 1)
+    Log("[kodi-ps5] videodec2: pipeline depth %d (kodi-hw-pipeline2)\n", config.pipelineDepth);
   Log("[kodi-ps5] videodec2: %s %dx%d needs cpu=%llx gpu=%llx shared=%llx frame=%llx\n",
       codec == VideoDec2Codec::H264
           ? "H.264"

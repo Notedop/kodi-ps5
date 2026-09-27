@@ -22,21 +22,23 @@ using namespace KODI::PLATFORM::PS5;
 
 namespace
 {
-// kodi-multichannel: 8-channel output (Kodi remaps 5.1/7.1 into it, and the
-// PS5 downmixes to what the display or receiver takes). The sink declares
-// the port's own channel order, which is the order Kodi writes samples in.
+// 8-channel output (Kodi remaps 5.1/7.1 into it, and the PS5 downmixes to
+// what the display or receiver takes). The sink declares the port's own
+// channel order, which is the order Kodi writes samples in.
+// kodi-stereo-only: a 2-channel port, and no passthrough offered.
 // kodi-multichannel-alt: the other 8-channel variant (sides and backs swapped).
 bool MultichannelEnabled()
 {
-  return getenv("KODI_PS5_MULTICHANNEL") != nullptr;
+  return getenv("KODI_PS5_STEREO_ONLY") == nullptr;
 }
 
-// kodi-passthrough: Dolby/DTS as IEC 61937 packets inside 16-bit stereo PCM.
-// Only works if the PS5 passes the PCM through bit-exactly (audio output set
-// to Linear PCM); otherwise the receiver plays the packets as loud noise.
+// Passthrough (Kodi's "Allow passthrough" setting, off by default): Dolby/DTS
+// as IEC 61937 packets inside 16-bit stereo PCM. Only works if the PS5 passes
+// the PCM through bit-exactly (audio output set to Linear PCM); otherwise the
+// receiver plays the packets as loud noise.
 bool PassthroughEnabled()
 {
-  return getenv("KODI_PS5_PASSTHROUGH") != nullptr;
+  return getenv("KODI_PS5_STEREO_ONLY") == nullptr;
 }
 
 bool AltChannelOrder()

@@ -1,0 +1,18 @@
+Tone mapping defaults to Hable on the PS5: its output is SDR, and Kodi's fresh-profile default (off) shows HDR video washed out with grey blacks. Existing profiles keep their saved choice (video OSD: Tone mapping).
+
+--- a/xbmc/cores/VideoSettings.cpp	2026-09-27 21:00:02.780175175 +0000
++++ b/xbmc/cores/VideoSettings.cpp	2026-09-27 21:00:02.795593888 +0000
+@@ -39,7 +39,13 @@
+   m_StereoMode = 0;
+   m_StereoInvert = false;
+   m_VideoStream = -1;
++#if defined(TARGET_PS5)
++  // SDR output: HDR video looks washed out without tone mapping, and a fresh
++  // profile would save "off" as its default
++  m_ToneMapMethod = VS_TONEMAPMETHOD_HABLE;
++#else
+   m_ToneMapMethod = VS_TONEMAPMETHOD_OFF;
++#endif
+   m_ToneMapParam = 1.0f;
+   m_Orientation = 0;
+   m_CenterMixLevel = 0;

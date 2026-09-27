@@ -12,7 +12,13 @@
 #include <stddef.h>
 #include <stdio.h>
 
-#define PS5_MIN_THREAD_STACK (1024u * 1024u) /* as Kodi gets on Android */
+/* Kodi's usual size on Linux. 1 MiB was not enough: thumbnail extraction
+ * (software HEVC decode plus JPEG encoding on a job worker) overflowed it,
+ * crashing at once or - by corrupting neighbouring memory - when the worker
+ * thread later terminated. */
+#define PS5_MIN_THREAD_STACK (8u * 1024u * 1024u)
+/* if the system refuses a thread at that size, smaller ones are tried */
+static const size_t fallback_stacks[] = {4u * 1024u * 1024u, 1024u * 1024u};
 
 int __real_pthread_create(pthread_t* thread, const pthread_attr_t* attr,
                           void* (*start)(void*), void* arg);
@@ -57,7 +63,29 @@ int __wrap_pthread_create(pthread_t* thread, const pthread_attr_t* attr,
     pthread_attr_setstacksize((pthread_attr_t*)attr, PS5_MIN_THREAD_STACK);
   }
 
-  const int result = __real_pthread_create(thread, use, start, arg);
+  int result = __real_pthread_create(thread, use, start, arg);
+  if (result != 0 && own)
+  {
+    /* a resource limit on the requested size: retry smaller, and say so once */
+    for (size_t i = 0; result != 0 && i < sizeof(fallback_stacks) / sizeof(*fallback_stacks); ++i)
+    {
+      pthread_attr_setstacksize(&local, fallback_stacks[i]);
+      result = __real_pthread_create(thread, &local, start, arg);
+      if (result == 0)
+      {
+        static int reported;
+        if (!reported)
+        {
+          reported = 1;
+          char msg[160];
+          snprintf(msg, sizeof(msg),
+                   "[kodi-ps5] threads: a %u KiB stack was refused, using %zu KiB\n",
+                   PS5_MIN_THREAD_STACK / 1024, fallback_stacks[i] / 1024);
+          sceKernelDebugOutText(0, msg);
+        }
+      }
+    }
+  }
   if (own)
     pthread_attr_destroy(&local);
   return result;
