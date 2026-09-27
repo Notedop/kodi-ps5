@@ -19,6 +19,7 @@
 #include "cores/VideoPlayer/VideoRenderers/LinuxRendererGL.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <map>
 #include <tuple>
 
@@ -59,6 +60,7 @@ private:
   using ImageTargetTexture2D = void (*)(GLenum target, void* image);
   ImageTargetTexture2D m_imageTargetTexture2D = nullptr;
   bool m_failureLogged = false;
+  const bool m_debug = std::getenv("KODI_PS5_DEBUG") != nullptr; // per-buffer texture log
 
   void DeleteFrames();
 };

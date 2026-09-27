@@ -9,6 +9,7 @@
 #include "RendererPS5.h"
 
 #include "VideoBufferPS5.h"
+#include "cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h"
 #include "cores/VideoPlayer/VideoRenderers/RenderFactory.h"
 #include "utils/GLUtils.h"
 #include "utils/log.h"
@@ -56,6 +57,9 @@ bool CRendererPS5::Configure(const VideoPicture& picture, float fps, unsigned in
       reinterpret_cast<ImageTargetTexture2D>(eglGetProcAddress("glEGLImageTargetTexture2DOES"));
   for (auto& fence : m_fences)
     fence = {};
+  if (m_debug)
+    CLog::Log(LOGINFO, "CRendererPS5 (kodi-debug): Configure {}x{} @ {:.3f} fps, {} cached frames dropped",
+              picture.iWidth, picture.iHeight, fps, m_frames.size());
   DeleteFrames(); // a new stream: frames may sit elsewhere now
   const bool ok = CLinuxRendererGL::Configure(picture, fps, orientation);
   // EGL images bind to 2D textures (the copying path uses rectangle textures)
@@ -80,6 +84,13 @@ bool CRendererPS5::CreateTexture(int index)
   im.cshift_x = 1;
   im.cshift_y = 1;
   planes[0].id = 1; // textures are attached per frame in UploadTexture
+  // as the base renderer does: a picture still held in this buffer must be
+  // attached again before it is rendered (after a reconfigure, e.g. the
+  // refresh-rate switch for VRR, the ids above are placeholders)
+  buf.loaded = false;
+  if (m_debug)
+    CLog::Log(LOGINFO, "CRendererPS5 (kodi-debug): CreateTexture {} ({}x{})", index, im.width,
+              im.height);
   return true;
 }
 
@@ -97,7 +108,12 @@ bool CRendererPS5::UploadTexture(int index)
   CPictureBuffer& buf = m_buffers[index];
   auto* frame = dynamic_cast<CVideoBufferPS5*>(buf.videoBuffer);
   if (!frame || !frame->Luma() || !m_imageTargetTexture2D)
+  {
+    if (m_debug)
+      CLog::Log(LOGWARNING, "CRendererPS5 (kodi-debug): buffer {} has {}", index,
+                !frame ? "no zero-copy picture" : (!frame->Luma() ? "an empty picture" : "no EGL image function"));
     return false;
+  }
 
   const unsigned bytes = frame->BitDepth() > 8 ? 2 : 1;
   const unsigned pitch = frame->Pitch();
@@ -144,6 +160,12 @@ bool CRendererPS5::UploadTexture(int index)
     glBindTexture(GL_TEXTURE_2D, 0);
     VerifyGLState();
     it = m_frames.emplace(key, textures).first;
+    if (m_debug)
+      CLog::Log(LOGINFO,
+                "CRendererPS5 (kodi-debug): buffer {}: textures {} (luma) / {} (chroma) over frame "
+                "{} ({}x{} texels, {}-bit)",
+                index, textures.luma, textures.chroma, static_cast<const void*>(frame->Luma()),
+                lumaWidth, rows, bytes * 8);
     if (m_frames.size() == 1)
       CLog::Log(LOGINFO,
                 "CRendererPS5: first frame shown without copying ({} bytes per row, {} rows, "
