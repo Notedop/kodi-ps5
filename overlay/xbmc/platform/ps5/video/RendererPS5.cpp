@@ -147,8 +147,8 @@ bool CRendererPS5::UploadTexture(int index)
     if (m_frames.size() == 1)
       CLog::Log(LOGINFO,
                 "CRendererPS5: first frame shown without copying ({} bytes per row, {} rows, "
-                "{}-bit samples)",
-                pitch, rows, bytes * 8);
+                "{}-bit textures, {}-bit values)",
+                pitch, rows, bytes * 8, bytes == 2 ? buf.m_srcBits : 8);
   }
 
   CYuvPlane(&planes)[3] = buf.fields[0];
@@ -166,7 +166,11 @@ bool CRendererPS5::UploadTexture(int index)
   planes[0].id = it->second.luma;
   planes[1].id = it->second.chroma;
   planes[2].id = it->second.chroma;
-  buf.m_srcTextureBits = static_cast<int>(bytes * 8);
+  // Kodi's convention: the depth of the values inside the texture, not the
+  // texture's width - 10 for samples in the lower 10 bits of 16-bit words
+  // (the shader then scales by 65535/1023), 16 for upper-aligned ones. The
+  // codec reports that as the picture's colorBits (buf.m_srcBits).
+  buf.m_srcTextureBits = bytes == 2 ? buf.m_srcBits : 8;
 
   CalculateTextureSourceRects(index, 3);
   return true;
