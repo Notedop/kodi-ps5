@@ -9,7 +9,6 @@
 #pragma once
 
 #include <chrono>
-#include <cstdlib>
 
 #include "WinSystemPS5.h"
 #include "rendering/gl/RenderSystemGL.h"
@@ -70,11 +69,6 @@ protected:
 private:
   bool m_videoOutLogged = false;
   std::chrono::steady_clock::time_point m_nextVrrPresent{}; // VRR presentation cadence
-  // kodi-debug: presented-frame statistics
-  const bool m_countPresents = std::getenv("KODI_PS5_DEBUG") != nullptr;
-  unsigned m_presents = 0;
-  unsigned m_presentsWithGui = 0;
-  std::chrono::steady_clock::time_point m_presentWindow{};
 
   bool CreateContext();
   void QueryOutputGeometry();
