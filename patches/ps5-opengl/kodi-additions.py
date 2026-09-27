@@ -70,7 +70,7 @@ ps5_opengl_set_scanout_format(uint64_t pixel_format)
     } else {
         current = pixel_format;
     }
-    printf("[kodi-ps5] scanout format %016llx: unregister=%08x register=%08x restore=%08x\n",
+    printf("[kodi-ps5] scanout format %016llx: unregister=%08x register=%08x restore=%08x\\n",
            (unsigned long long)pixel_format, (uint32_t)unregister_rc, (uint32_t)register_rc,
            (uint32_t)restore_rc);
     return register_rc;
@@ -245,6 +245,12 @@ ps5_opengl_memory_image_destroy(void *image)
 ]
 
 # Texts earlier versions inserted; removed when present.
+# An earlier revision of the HDR addition wrote the printf's "\\n" escape as a
+# real line break (a compile error); that form is removed before the correct
+# one is added.
+HDR_BROKEN = [(rel, text.replace('restore=%08x' + chr(92) + 'n",', 'restore=%08x' + chr(10) + '",'))
+              for rel, anchor, text, where in HDR]
+
 REMOVED = [
     (SCREEN, '/* KODI-PS5: profiler output to klog (a title\'s stdout goes nowhere). */\n#include <stdarg.h>\nint sceKernelDebugOutText(int channel, const char *text);\nuint64_t sceKernelGetProcessTime(void);\nstatic int ps5_kodi_klog_printf(const char *format, ...)\n   __attribute__((format(printf, 1, 2)));\nstatic int ps5_kodi_klog_printf(const char *format, ...)\n{\n   char line[512];\n   const int prefix = snprintf(line, sizeof(line), "[ps5-gl %.3f] ",\n                               (double)sceKernelGetProcessTime() / 1000.0);\n   va_list args;\n   va_start(args, format);\n   const int written = vsnprintf(line + prefix, sizeof(line) - (size_t)prefix,\n                                 format, args);\n   va_end(args);\n   sceKernelDebugOutText(0, line);\n   return written;\n}\n#define printf ps5_kodi_klog_printf\n'),
     (SCREEN, '/* KODI-PS5: profiler output to klog (a title\'s stdout goes nowhere). */\n#include <stdarg.h>\nint sceKernelDebugOutText(int channel, const char *text);\nuint64_t sceKernelGetProcessTime(void);\nstatic int ps5_kodi_klog_printf(const char *format, ...)\n   __attribute__((format(printf, 1, 2)));\nstatic int ps5_kodi_klog_printf(const char *format, ...)\n{\n   char line[512];\n   const int prefix = snprintf(line, sizeof(line), "[ps5-gl %.3f] ",\n                               (double)sceKernelGetProcessTime() / 1000.0);\n   va_list args;\n   va_start(args, format);\n   const int written = vsnprintf(line + prefix, sizeof(line) - (size_t)prefix,\n                                 format, args);\n   va_end(args);\n   sceKernelDebugOutText(0, line);\n   return written;\n}\n#define printf ps5_kodi_klog_printf\n/* KODI-PS5: which clear path each clear takes (GPU depth, CPU depth, GPU\n * color, CPU color), reported with the profile. */\nstatic uint64_t ps5_kodi_clear_paths[4];\n#define PS5_KODI_COUNT_CLEAR(path) \\\n   __atomic_fetch_add(&ps5_kodi_clear_paths[path], 1, __ATOMIC_RELAXED)\n'),
@@ -257,7 +263,7 @@ REMOVED = [
     (SCREEN, '#if defined(PS5_NATIVE_TITLE_RUNTIME) && defined(PS5_DRAW_PROFILE)\n   if (buffers & PIPE_CLEAR_COLOR)\n      ps5_kodi_count_clear(3); /* KODI-PS5: CPU color clear */\n#endif\n'),
 ]
 
-for rel, text in REMOVED:
+for rel, text in REMOVED + HDR_BROKEN:
     path = root / rel
     source = path.read_text()
     if text in source:
