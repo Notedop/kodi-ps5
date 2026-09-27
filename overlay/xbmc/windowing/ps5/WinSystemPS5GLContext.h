@@ -10,6 +10,7 @@
 
 #include <chrono>
 
+#include "HdrOutputPS5.h"
 #include "WinSystemPS5.h"
 #include "rendering/gl/RenderSystemGL.h"
 #include "utils/EGLUtils.h"
@@ -61,6 +62,15 @@ public:
 
   // CRenderSystemGL
   void PresentRender(bool rendered, bool videoLayer) override;
+  bool BeginRender() override;
+
+  // HDR output for PQ video (HdrOutputPS5): Kodi's HDR and GUI-compositing hooks
+  bool SetHDR(const VideoPicture* videoPicture) override;
+  bool IsHDRDisplay() override;
+  bool SetGuiCompositing(int colorTransfer) override;
+  bool BeginGuiComposite(bool guiWillRender) override;
+  void EndGuiComposite() override;
+  void CompositeGui() override;
 
 protected:
   void SetVSyncImpl(bool enable) override;
@@ -70,6 +80,7 @@ private:
   bool m_videoOutLogged = false;
   std::chrono::steady_clock::time_point m_nextVrrPresent{}; // VRR presentation cadence
   std::chrono::steady_clock::time_point m_lastLinkCheck{};  // VRR link re-check (2 s)
+  KODI::PLATFORM::PS5::CHdrOutputPS5 m_hdr;
 
   bool CreateContext();
   void QueryOutputGeometry();

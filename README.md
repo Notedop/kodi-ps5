@@ -23,7 +23,7 @@ working on 4.03 (ItemzFlow + etaHEN 2.3b).
 
 | Works | Not yet |
 | --- | --- |
-| Estuary GUI rendered natively at 3840x2160 (OpenGL 4.6 on the PS5 GPU) | HDR output (the SDR output shows HDR video as Kodi does anywhere without HDR: washed out unless *Tone mapping* is chosen in the video OSD); H.264 High 10 and HEVC 4:2:2/4:4:4 in hardware |
+| Estuary GUI rendered natively at 3840x2160 (OpenGL 4.6 on the PS5 GPU); **HDR10 output** while PQ video plays (BT.2020 PQ 10-bit scanout, GUI composited in PQ) | HLG output (tone mapped, as on an SDR display); H.264 High 10 and HEVC 4:2:2/4:4:4 in hardware |
 | Menus and stopped state at 60 Hz (59.94) | Fixed 24/25/50 Hz output modes (the PS5 refuses explicit rates from titles) |
 | VRR during playback, matched to the video's frame rate (see *Display*) | VRR with the PS5's VRR setting off |
 | *Sync playback to display* on a fixed 59.94 Hz output | The player debug overlay (L3) during VRR raises the rate to ~120 Hz |
@@ -159,6 +159,7 @@ processes, so FTP cannot delete Kodi's data — these let Kodi do it:
 | `kodi-swdecode` | software (FFmpeg) video decoding only, no hardware decoder |
 | `kodi-no-zerocopy` | show video through the copying path instead of zero-copy (troubleshooting: flicker, black video) |
 | `kodi-stereo-only` | a 2-channel audio port and no passthrough offered (the default is 8 channels, with Dolby/DTS passthrough available to Kodi's *Allow passthrough* setting) |
+| `kodi-no-hdr` | keep the output SDR for HDR video too (Kodi then tone maps, if *Tone mapping* is set in the video OSD) |
 | `kodi-multichannel-alt` | the other 8-channel order, if side and back speakers come out swapped |
 | `kodi-hw-pipeline2` | *(experiment)* hardware decoder with two frames in flight, for 4K60 VP9/HEVC that stutters at the default depth of one; `kodi-debug` logs decode times every 5 seconds |
 | `kodi-probe-hdr` | *(probe, for HDR development)* after start-up, switch the scanout buffers to the HDR format for 3 seconds and log the result; the TV should report HDR meanwhile (the picture is wrong during those seconds) |

@@ -218,6 +218,44 @@ void CWinSystemPS5GLContext::SetVSyncImpl(bool enable)
   m_eglContext.SetVSync(enable);
 }
 
+bool CWinSystemPS5GLContext::BeginRender()
+{
+  const bool ok = CRenderSystemGL::BeginRender();
+  m_hdr.BindTarget(m_nWidth, m_nHeight); // HDR: the frame renders into the 10-bit target
+  return ok;
+}
+
+bool CWinSystemPS5GLContext::SetHDR(const VideoPicture* videoPicture)
+{
+  return m_hdr.SetHDR(videoPicture);
+}
+
+bool CWinSystemPS5GLContext::IsHDRDisplay()
+{
+  return KODI::PLATFORM::PS5::ScanoutFormatSwitchAvailable();
+}
+
+bool CWinSystemPS5GLContext::SetGuiCompositing(int colorTransfer)
+{
+  return m_hdr.SetGuiCompositing(colorTransfer, UseLimitedColor());
+}
+
+bool CWinSystemPS5GLContext::BeginGuiComposite(bool guiWillRender)
+{
+  return m_hdr.BeginGuiComposite(guiWillRender, m_nWidth, m_nHeight,
+                                 GetEnabledFrontToBackRendering());
+}
+
+void CWinSystemPS5GLContext::EndGuiComposite()
+{
+  m_hdr.EndGuiComposite();
+}
+
+void CWinSystemPS5GLContext::CompositeGui()
+{
+  m_hdr.CompositeGui(GetGUIElementCount());
+}
+
 void CWinSystemPS5GLContext::PresentRender(bool rendered, bool videoLayer)
 {
   if (!m_bRenderCreated)
@@ -225,6 +263,8 @@ void CWinSystemPS5GLContext::PresentRender(bool rendered, bool videoLayer)
 
   if (rendered || videoLayer)
   {
+    m_hdr.Pack(m_nWidth, m_nHeight); // HDR: the packed 10-bit words into the real framebuffer
+
     UpdateHdrScanoutProbe(); // kodi-probe-hdr: back to SDR after 3 seconds
 
     // the system may switch the output onto (or off) its VRR link at any time

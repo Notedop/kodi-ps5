@@ -60,5 +60,6 @@ constexpr uint64_t kScanoutFormatHdr = UINT64_C(0x8100070422000000);
 // results[0..3] = change, unregister, register, restore (0x7fffffff: not
 // attempted). 0 if the format is in effect; -1 if the driver lacks the addition.
 int SetScanoutFormat(uint64_t format, int32_t results[4]);
+bool ScanoutFormatSwitchAvailable(); // this build of the GL driver has the addition
 std::string DescribeScanoutResults(const int32_t results[4]);
 } // namespace KODI::PLATFORM::PS5

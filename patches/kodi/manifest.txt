@@ -10,3 +10,4 @@
 0010-refresh-integer-multiple-first-ps5.patch
 0011-renderer-no-pbo-rectangle-always-ps5.patch
 0012-refresh-vrr-playback-only-ps5.patch
+0013-default-framebuffer-hdr-ps5.patch

@@ -180,6 +180,11 @@ int KODI::PLATFORM::PS5::SetScanoutFormat(uint64_t format, int32_t results[4])
   return ps5_opengl_set_scanout_format(format, results);
 }
 
+bool KODI::PLATFORM::PS5::ScanoutFormatSwitchAvailable()
+{
+  return ps5_opengl_set_scanout_format != nullptr;
+}
+
 std::string KODI::PLATFORM::PS5::DescribeScanoutResults(const int32_t results[4])
 {
   static const char* const names[4] = {"change", "unregister", "register", "restore"};
