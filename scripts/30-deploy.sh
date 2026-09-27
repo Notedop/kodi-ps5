@@ -130,6 +130,7 @@ grep -q -- "--wrap=malloc" "$APP/tools/build.sh" || { echo "!! template build.sh
 
 echo "==> 3. Kodi link inputs"
 python3 - "$BUILD" "$APP/vendor" "$HB" "$PS5_PAYLOAD_SDK" "$PS5_OPENGL_PREFIX" <<'PY'
+import os
 import re, sys, os, shlex
 build, vendor, hb, sdk, gl = sys.argv[1:6]
 ninja = open(os.path.join(build, "build.ninja")).read()
@@ -218,10 +219,16 @@ p["downloadDataSize"] = max(int(p.get("downloadDataSize", 0)), 2048)  # /downloa
 # as ProsperoLight declares): the PS5 runs VRR through this preset, which Kodi
 # uses only for VRR during playback, never as a fixed 120 Hz output.
 p["attribute3"] = int(p.get("attribute3", 0)) | 0x80040
-# HDR-capable title metadata: without it, registering scanout buffers in the
-# HDR format fails (BlackBearReloaded's video research). The flags
-# ProsperoLight declares, which outputs HDR10 as a homebrew title.
-p["attribute"] = int(p.get("attribute", 0)) | 0x62000000
+# HDR-capable title metadata (the flags ProsperoLight declares): without it
+# the HDR scanout format is refused (BlackBearReloaded's video research). With
+# it, the PS5 keeps the TV in HDR for the whole session when its HDR setting is
+# "On When Supported", mapping SDR content itself - its standard behaviour for
+# HDR-capable titles. KODI_HDR_TITLE=0 builds an SDR title instead (TV stays
+# SDR; HDR video is tone mapped by Kodi).
+if os.environ.get("KODI_HDR_TITLE", "1") != "0":
+    p["attribute"] = int(p.get("attribute", 0)) | 0x62000000
+else:
+    p["attribute"] = int(p.get("attribute", 0)) & ~0x62000000
 category = os.environ.get("KODI_CATEGORY", "game")
 if category == "media":
     p["applicationCategoryType"] = 65536
