@@ -23,7 +23,7 @@ working on 4.03 (ItemzFlow + etaHEN 2.3b).
 
 | Works | Not yet |
 | --- | --- |
-| Estuary GUI rendered natively at 3840x2160 (OpenGL 4.6 on the PS5 GPU) | HDR output (HDR10 video is tone-mapped to SDR); H.264 High 10 and HEVC 4:2:2/4:4:4 in hardware |
+| Estuary GUI rendered natively at 3840x2160 (OpenGL 4.6 on the PS5 GPU) | HDR output (the SDR output shows HDR video as Kodi does anywhere without HDR: washed out unless *Tone mapping* is chosen in the video OSD); H.264 High 10 and HEVC 4:2:2/4:4:4 in hardware |
 | Menus and stopped state at 60 Hz (59.94) | Fixed 24/25/50 Hz output modes (the PS5 refuses explicit rates from titles) |
 | VRR during playback, matched to the video's frame rate (see *Display*) | VRR with the PS5's VRR setting off |
 | *Sync playback to display* on a fixed 59.94 Hz output | The player debug overlay (L3) during VRR raises the rate to ~120 Hz |

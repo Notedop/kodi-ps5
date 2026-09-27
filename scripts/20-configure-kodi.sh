@@ -36,6 +36,18 @@ export PS5_OPENGL_PREFIX="${PS5_OPENGL_PREFIX:-/opt/ps5-opengl-gl46}"
 # Kodi patches always start from Kodi's own files: restore every file a patch
 # touches from git, so a patch that changed between rounds (or one applied
 # only partly before) cannot leave a mixed file behind.
+# The patch folder must match the manifest exactly: extracting a release zip
+# over the folder never deletes files, so a removed or renamed patch would
+# otherwise linger and be applied (or fail) alongside the current one.
+if [ -f "$HERE/patches/kodi/manifest.txt" ]; then
+  EXPECTED=$(sort "$HERE/patches/kodi/manifest.txt")
+  PRESENT=$(ls "$HERE"/patches/kodi/*.patch | xargs -n1 basename | sort)
+  if [ "$EXPECTED" != "$PRESENT" ]; then
+    echo "!! patches/kodi does not match patches/kodi/manifest.txt:"
+    diff <(echo "$EXPECTED") <(echo "$PRESENT") | sed 's/^</   missing:/; s/^>/   stale (delete it):/' | grep 'missing\|stale'
+    exit 1
+  fi
+fi
 PATCHED_FILES=$(grep -h '^+++ b/' "$HERE"/patches/kodi/*.patch | sed 's|^+++ b/||; s|\t.*||' | sort -u)
 if git -C "$KODI_SRC" rev-parse --git-dir >/dev/null 2>&1; then
   echo "==> restoring the $(echo "$PATCHED_FILES" | wc -l) Kodi files our patches change"
@@ -100,7 +112,11 @@ esac
 exec "$PS5_PAYLOAD_SDK/bin/prospero-pkg-config" "\$@"
 WRAP
 chmod +x "$BUILD/kodi-pkg-config"
+# CMake caches pkg-config results; FFmpeg's link flags must be re-read every
+# configure, or a rebuilt FFmpeg (new dependencies such as dav1d) links with
+# the flags of the old one and kodi.bin fails with undefined symbols.
 cmake -S "$KODI_SRC" -B "$BUILD" -G Ninja \
+  -U "FFMPEG_*" \
   -DCMAKE_TOOLCHAIN_FILE="$HERE/toolchain/ps5-kodi.cmake" \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE:-Release}" \
   -DCMAKE_C_FLAGS_RELEASE="-O2 -g -DNDEBUG" \
