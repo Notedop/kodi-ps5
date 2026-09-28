@@ -75,6 +75,7 @@ CDVDVideoCodecPS5::~CDVDVideoCodecPS5()
 {
   LogStreamSummary();
   ClearQueue();
+  ReleaseHeld();
   CloseDeinterlacer();
   av_bsf_free(&m_bsf);
   av_packet_free(&m_packet);
@@ -156,6 +157,7 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
   m_streamDecodes = 0;
   m_streamDecodeMs = m_streamMaxMs = 0.0;
   m_streamOverBudget = 0;
+  m_held.clear();
   if (!m_decoder->Open(codec, hints.width, hints.height, error, interlaced, fps))
   {
     CLog::Log(LOGWARNING, "CDVDVideoCodecPS5: hardware decoder unavailable ({}), using FFmpeg",
@@ -194,6 +196,8 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
   m_vp9 = codec == VideoDec2Codec::VP9 || codec == VideoDec2Codec::VP9Profile2;
   m_tenBit = codec == VideoDec2Codec::HEVCMain10 || codec == VideoDec2Codec::VP9Profile2 ||
              codec == VideoDec2Codec::H264High10;
+  m_hevc = codec == VideoDec2Codec::HEVC || codec == VideoDec2Codec::HEVCMain10;
+  m_skipRasl = m_hevc;
   m_alignmentKnown = !m_tenBit;
   m_alignmentSamples = 0;
   // 10-bit: lower-aligned until a picture shows otherwise (DetectAlignment)
@@ -207,6 +211,7 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
   if (m_hasLightMetadata)
     m_lightMetadata = *hints.contentLightMetadata;
 
+  m_hold = m_decoder->PipelineDepth() > 1 ? m_decoder->PipelineDepth() - 1 : 0;
   m_processInfo.SetVideoDecoderName(GetName(), true);
   m_processInfo.SetVideoPixelFormat(m_tenBit ? "p010 (lsb)" : "nv12");
   if (m_vp9)
@@ -380,8 +385,33 @@ bool Vp9FrameIsShown(const uint8_t* data, size_t size)
 }
 } // namespace
 
+bool CDVDVideoCodecPS5::HevcAccessUnitIsRasl(const uint8_t* data, size_t size)
+{
+  // Annex-B: the first VCL NAL unit decides. HEVC NAL header: type in bits
+  // 1-6 of the first byte; RASL_N = 8, RASL_R = 9; VCL types are 0-31.
+  for (size_t i = 0; i + 3 < size; ++i)
+  {
+    if (data[i] != 0 || data[i + 1] != 0 || data[i + 2] != 1)
+      continue;
+    const uint8_t type = (data[i + 3] >> 1) & 0x3f;
+    if (type <= 31)
+      return type == 8 || type == 9;
+    i += 2;
+  }
+  return false;
+}
+
 bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
 {
+  if (m_hevc && m_skipRasl)
+  {
+    if (HevcAccessUnitIsRasl(data, size))
+    {
+      NextPts(); // its timestamp goes with it
+      return true;
+    }
+    m_skipRasl = false;
+  }
   const bool thisShown = !m_vp9 || Vp9FrameIsShown(data, size);
   bool gotPicture = false;
   const auto decodeStart = std::chrono::steady_clock::now();
@@ -457,8 +487,27 @@ bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
     return true;
   }
   if (gotPicture)
-    Keep(picture);
+    Accept(picture);
   return true;
+}
+
+bool CDVDVideoCodecPS5::Accept(const VideoDec2Picture& picture)
+{
+  if (m_hold == 0)
+    return Keep(picture);
+  m_held.push_back(picture);
+  if (m_held.size() <= m_hold)
+    return true; // possibly still being written: wait for later pictures
+  const VideoDec2Picture ready = m_held.front();
+  m_held.pop_front();
+  return Keep(ready);
+}
+
+void CDVDVideoCodecPS5::ReleaseHeld()
+{
+  for (const auto& picture : m_held)
+    m_decoder->ReleaseFrame(picture.frameIndex);
+  m_held.clear();
 }
 
 void CDVDVideoCodecPS5::LogStreamSummary()
@@ -742,7 +791,9 @@ void CDVDVideoCodecPS5::ClearQueue()
 void CDVDVideoCodecPS5::Reset()
 {
   ClearQueue();
+  ReleaseHeld();
   m_pts.clear();
+  m_skipRasl = m_hevc;
   m_decoder->Reset();
   m_pendingAus.clear();
   m_vp9PendingShown.clear();
@@ -764,7 +815,14 @@ CDVDVideoCodec::VCReturn CDVDVideoCodecPS5::GetPicture(VideoPicture* pVideoPictu
   {
     VideoDec2Picture picture;
     if (m_decoder->Flush(&picture))
-      Keep(picture);
+      Accept(picture);
+    else if (!m_held.empty())
+    {
+      // the pipeline is empty, so every held picture is complete
+      const VideoDec2Picture ready = m_held.front();
+      m_held.pop_front();
+      Keep(ready);
+    }
     else
       return VC_EOF;
   }

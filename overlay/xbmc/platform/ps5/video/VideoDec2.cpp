@@ -278,14 +278,16 @@ bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& 
   // VP9 surfaces are exactly the frame size (the research's proven modes)
   config.maxHeight = vp9 ? (uhd ? 2160 : 1080) : (uhd ? 2176 : 1088);
   config.maxDpbFrames = 16;
-  // Pipeline depth: the picture returned by a decode call is the one that
-  // entered the pipeline `depth` calls ago. At depth 2 it can still be
-  // finishing on the GPU when the zero-copy path shows it (black regions that
-  // fill in later: measured on H.264). EVO Player's validated configuration
-  // is depth 4 for the 8-bit codecs (the returned picture is three calls old
-  // and complete) and depth 1 for the 10-bit ones, so that is what this uses.
+  // Pipeline depth: above 1 the decode call returns while the picture's
+  // compute job may still be writing it (a GPU reader that samples the whole
+  // frame at once saw unwritten regions; a CPU copy never does). Jobs run in
+  // order on the compute queue, so a picture is complete once a later one has
+  // been returned: the codec holds pictures back by depth-1 calls. EVO
+  // Player's validated configuration: depth 4 for the 8-bit codecs, 1 for the
+  // 10-bit ones.
   (void)fps;
   config.pipelineDepth = m_tenBit ? 1 : 4;
+  m_pipelineDepth = config.pipelineDepth;
   config.computeQueue = reinterpret_cast<uint64_t>(m_computeQueue);
   config.cpuAffinity = 0x3f;
   config.cpuPriority = 700;

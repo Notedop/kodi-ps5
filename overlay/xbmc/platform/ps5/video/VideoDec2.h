@@ -63,6 +63,7 @@ public:
   // Pooled mode (zero-copy video): a frame returned as a picture stays out of
   // the decoder's reach until ReleaseFrame. Set before Open.
   void SetPooled(bool pooled) { m_pooled = pooled; }
+  unsigned PipelineDepth() const { return m_pipelineDepth; }
   bool IsPooled() const { return m_pooled; }
   // pooled mode: Decode found no free frame; the access unit was not consumed
   bool Stalled() const { return m_stalled; }
@@ -127,6 +128,7 @@ private:
     Kodi,    // returned as a picture, until ReleaseFrame
   };
   bool m_pooled = false;
+  unsigned m_pipelineDepth = 1;
   bool m_stalled = false;
   mutable std::mutex m_frameMutex;
   FrameState m_frameState[kFrameBuffers] = {};

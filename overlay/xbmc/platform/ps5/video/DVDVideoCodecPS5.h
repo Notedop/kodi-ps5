@@ -69,6 +69,13 @@ private:
   bool SetupBitstreamFilter(const CDVDStreamInfo& hints);
   bool DecodeOne(const uint8_t* data, size_t size);
   bool Keep(const VideoDec2Picture& picture);
+  // A returned picture may still be being written when the pipeline is deeper
+  // than 1; it is complete once `depth-1` later pictures have come back. So
+  // pictures wait here that long before Keep() (drained at end of stream).
+  bool Accept(const VideoDec2Picture& picture);
+  void ReleaseHeld();
+  std::deque<VideoDec2Picture> m_held;
+  unsigned m_hold = 0;
   double NextPts();
   void ClearQueue();
 
@@ -103,6 +110,13 @@ private:
   // the upper 10 bits (P010) or the lower 10; decided on the first picture.
   bool m_tenBit = false;
   bool m_vp9 = false; // superframes split; hidden frames' outputs not shown
+  bool m_hevc = false;
+  // HEVC after a seek (or at the start): the demuxer resumes at a CRA picture
+  // whose RASL leading pictures reference frames from before it. FFmpeg drops
+  // them silently; the hardware decoder errors on each. Dropped until the
+  // first non-RASL picture.
+  bool m_skipRasl = false;
+  static bool HevcAccessUnitIsRasl(const uint8_t* data, size_t size);
   // VP9: show flags of access units whose picture has not come out yet (with
   // frames in flight, a picture belongs to an earlier access unit)
   std::deque<bool> m_vp9PendingShown;

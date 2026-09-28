@@ -26,6 +26,8 @@
 #define CURL CURL_HANDLE
 #include <curl/curl.h>
 #undef CURL
+#include <fcntl.h>
+#include <pthread.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <openssl/crypto.h>
@@ -36,6 +38,11 @@
 namespace
 {
 constexpr const char* kTag = "PS5 network self-test";
+
+std::string Errno()
+{
+  return "errno " + std::to_string(errno) + " (" + std::strerror(errno) + ")";
+}
 
 void Request(const char* url, std::vector<char>& ca)
 {
@@ -104,17 +111,34 @@ void Run()
     close(pair[1]);
   }
 
-  // 3b. pipe(): curl's resolver wake-up (through the socketpair fallback)
+  // 3b. curl's resolver wake-up, step by step: pipe (through the socketpair
+  // fallback), close-on-exec on both ends, pipe2 with O_CLOEXEC, and a thread
+  // created the way curl does it (default attributes)
   int fds[2] = {-1, -1};
   const int pipeRc = pipe(fds);
-  CLog::Log(pipeRc == 0 ? LOGINFO : LOGWARNING, "{}: pipe(): {}", kTag,
-            pipeRc == 0 ? std::string("ok") : std::string("errno ") + std::to_string(errno) +
-                                                  " (" + std::strerror(errno) + ")");
+  std::string pipeText = pipeRc == 0 ? "ok" : Errno();
   if (pipeRc == 0)
+  {
+    const int cloexec0 = fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+    const int cloexec1 = fcntl(fds[1], F_SETFD, FD_CLOEXEC);
+    pipeText += cloexec0 == 0 && cloexec1 == 0 ? ", FD_CLOEXEC ok" : ", FD_CLOEXEC " + Errno();
+    close(fds[0]);
+    close(fds[1]);
+  }
+  const int pipe2Rc = pipe2(fds, O_CLOEXEC);
+  pipeText += pipe2Rc == 0 ? ", pipe2 ok" : ", pipe2 " + Errno();
+  if (pipe2Rc == 0)
   {
     close(fds[0]);
     close(fds[1]);
   }
+  pthread_t thread;
+  const int threadRc = pthread_create(&thread, nullptr, [](void*) -> void* { return nullptr; }, nullptr);
+  if (threadRc == 0)
+    pthread_join(thread, nullptr);
+  pipeText += threadRc == 0 ? ", thread ok" : ", thread rc " + std::to_string(threadRc);
+  CLog::Log(pipeRc == 0 && pipe2Rc == 0 && threadRc == 0 ? LOGINFO : LOGWARNING,
+            "{}: wake-up steps: pipe {}", kTag, pipeText);
 
   // 4. name resolution
   addrinfo hints{};
