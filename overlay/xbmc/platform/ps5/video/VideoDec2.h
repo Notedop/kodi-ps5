@@ -68,7 +68,6 @@ public:
   // Pooled mode (zero-copy video): a frame returned as a picture stays out of
   // the decoder's reach until ReleaseFrame. Set before Open.
   void SetPooled(bool pooled) { m_pooled = pooled; }
-  unsigned PipelineDepth() const { return m_pipelineDepth; }
   bool IsPooled() const { return m_pooled; }
   // pooled mode: Decode found no free frame; the access unit was not consumed
   bool Stalled() const { return m_stalled; }
@@ -78,10 +77,8 @@ public:
   bool HasFreeFrame() const;
 
   // Sets up memory, compute queue and decoder for streams up to width x height.
-  // fps: above 30 at 4K the decoder gets two frames in flight (pipeline
-  // depth 2), where depth 1 is just short of real time.
   bool Open(VideoDec2Codec codec, int width, int height, std::string& error,
-            bool interlaced = false, float fps = 0.0f);
+            bool interlaced = false);
   void Close();
 
   // Decode one access unit (Annex-B). Returns false on a decoder error.
@@ -133,7 +130,6 @@ private:
     Kodi,    // returned as a picture, until ReleaseFrame
   };
   bool m_pooled = false;
-  unsigned m_pipelineDepth = 1;
   bool m_stalled = false;
   mutable std::mutex m_frameMutex;
   FrameState m_frameState[kFrameBuffers] = {};

@@ -106,9 +106,9 @@ folder itself (`/data/homebrew/PPSA99420/kodi`).
 - **Hardware decoding** of HEVC 4:2:2/4:4:4 and 12-bit video: FFmpeg decodes
   them, which is slow at high resolutions. H.264 High 10 is offered to the
   hardware decoder and falls back to FFmpeg if the decoder refuses it.
-- **4K60 with 10-bit video** may stutter: the 10-bit codecs run the decoder
-  at pipeline depth 1 (8-bit codecs use depth 4, the configuration EVO Player
-  validated; depth 2 showed pictures before the decoder had finished them).
+- **4K60 video** may stutter: the decoder runs at pipeline depth 1, which
+  measured just short of a 60 fps frame at 4K. Deeper pipelines produced black
+  pictures after every seek on this hardware, so depth 1 stays.
 - **Fixed 24/25/50 Hz output:** the PS5 refuses explicit refresh rates from
   titles, so without VRR everything plays at 59.94 Hz.
 - **Dolby/DTS passthrough** (including TrueHD and DTS-HD at 8 channels and
@@ -253,6 +253,8 @@ overlay/                        copied onto a Kodi checkout by scripts/20-config
   cmake/platform/ps5/           platform selection and dependency exclusions
   cmake/scripts/ps5/            ArchSetup / PathSetup / Install / Macros for the ps5 core system
   cmake/treedata/ps5/           which xbmc/ subdirectories are compiled
+  cmake/installdata/ps5/        extra files installed (system/advancedsettings.xml: PS5 defaults)
+  system/advancedsettings.xml   Kodi defaults for the console (curl IPv4-only)
   xbmc/platform/ps5/            main.cpp, CPlatformPS5, CPU/GPU info, klog log sink, strptime
     audio/ input/ network/ storage/    AESinkPS5, PS5PadInput + the native keyboard (PS5ImeDialog), NetworkPS5, PS5StorageProvider
     filesystem/                 smb:// over libsmb2 (SMB2Session, CSMB2File, CSMB2Directory)

@@ -75,7 +75,6 @@ CDVDVideoCodecPS5::~CDVDVideoCodecPS5()
 {
   LogStreamSummary();
   ClearQueue();
-  ReleaseHeld();
   CloseDeinterlacer();
   av_bsf_free(&m_bsf);
   av_packet_free(&m_packet);
@@ -157,8 +156,7 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
   m_streamDecodes = 0;
   m_streamDecodeMs = m_streamMaxMs = 0.0;
   m_streamOverBudget = 0;
-  m_held.clear();
-  if (!m_decoder->Open(codec, hints.width, hints.height, error, interlaced, fps))
+  if (!m_decoder->Open(codec, hints.width, hints.height, error, interlaced))
   {
     CLog::Log(LOGWARNING, "CDVDVideoCodecPS5: hardware decoder unavailable ({}), using FFmpeg",
               error);
@@ -214,9 +212,6 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
   if (m_hasLightMetadata)
     m_lightMetadata = *hints.contentLightMetadata;
 
-  // Pictures come back complete in the frame offered with the same call, at
-  // any pipeline depth (traced on hardware), so nothing is held back.
-  m_hold = 0;
   m_trace = 30;
   m_processInfo.SetVideoDecoderName(GetName(), true);
   m_processInfo.SetVideoPixelFormat(m_tenBit ? "p010 (lsb)" : "nv12");
@@ -584,7 +579,7 @@ bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
     return true;
   }
   if (gotPicture)
-    Accept(picture);
+    Keep(picture);
   return true;
 }
 
@@ -617,24 +612,6 @@ void CDVDVideoCodecPS5::Trace(const char* stage, const VideoDec2Picture& picture
             picture.immediate ? "yes" : "no", gotPicture ? LumaSamples(picture) : "-");
 }
 
-bool CDVDVideoCodecPS5::Accept(const VideoDec2Picture& picture)
-{
-  if (m_hold == 0)
-    return Keep(picture);
-  m_held.push_back(picture);
-  if (m_held.size() <= m_hold)
-    return true; // possibly still being written: wait for later pictures
-  const VideoDec2Picture ready = m_held.front();
-  m_held.pop_front();
-  return Keep(ready);
-}
-
-void CDVDVideoCodecPS5::ReleaseHeld()
-{
-  for (const auto& picture : m_held)
-    m_decoder->ReleaseFrame(picture.frameIndex);
-  m_held.clear();
-}
 
 void CDVDVideoCodecPS5::LogStreamSummary()
 {
@@ -920,7 +897,6 @@ void CDVDVideoCodecPS5::ClearQueue()
 void CDVDVideoCodecPS5::Reset()
 {
   ClearQueue();
-  ReleaseHeld();
   m_pts.clear();
   m_skipRasl = m_hevc;
   m_prependParameterSets = !m_parameterSets.empty();
@@ -955,14 +931,7 @@ CDVDVideoCodec::VCReturn CDVDVideoCodecPS5::GetPicture(VideoPicture* pVideoPictu
   {
     VideoDec2Picture picture;
     if (m_decoder->Flush(&picture))
-      Accept(picture);
-    else if (!m_held.empty())
-    {
-      // the pipeline is empty, so every held picture is complete
-      const VideoDec2Picture ready = m_held.front();
-      m_held.pop_front();
-      Keep(ready);
-    }
+      Keep(picture);
     else
       return VC_EOF;
   }

@@ -212,7 +212,7 @@ int32_t CVideoDec2::LoadModule()
 }
 
 bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& error,
-                     bool interlaced, float fps)
+                     bool interlaced)
 {
   Close();
   const bool uhd = width > 1920 || height > 1088;
@@ -278,14 +278,13 @@ bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& 
   // VP9 surfaces are exactly the frame size (the research's proven modes)
   config.maxHeight = vp9 ? (uhd ? 2160 : 1080) : (uhd ? 2176 : 1088);
   config.maxDpbFrames = 16;
-  // Pipeline depth: the decoder queues that many access units; the first
-  // pictures come out after depth+1 calls, each complete, in the frame offered
-  // with the call that returned it (traced on hardware). Depth 4 for the 8-bit
-  // codecs and 1 for the 10-bit ones is EVO Player's validated configuration;
-  // 10-bit decoders refuse to decode (0x811d0111) at a deeper pipeline.
-  (void)fps;
-  config.pipelineDepth = m_tenBit ? 1 : 4;
-  m_pipelineDepth = config.pipelineDepth;
+  // Pipeline depth 1: the decode call returns the picture of the access unit
+  // it was given, complete. Deeper pipelines (2 and 4, traced on hardware)
+  // produce black pictures for about a second after every reset - the
+  // decoder decodes without error but against nothing, whatever keyframe or
+  // parameter sets it is given - and 10-bit decoders refuse them outright
+  // (0x811d0111). Real time at 4K60 is therefore the decoder's own job.
+  config.pipelineDepth = 1;
   config.computeQueue = reinterpret_cast<uint64_t>(m_computeQueue);
   config.cpuAffinity = 0x3f;
   config.cpuPriority = 700;
