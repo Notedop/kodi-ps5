@@ -104,6 +104,18 @@ void Run()
     close(pair[1]);
   }
 
+  // 3b. pipe(): curl's resolver wake-up (through the socketpair fallback)
+  int fds[2] = {-1, -1};
+  const int pipeRc = pipe(fds);
+  CLog::Log(pipeRc == 0 ? LOGINFO : LOGWARNING, "{}: pipe(): {}", kTag,
+            pipeRc == 0 ? std::string("ok") : std::string("errno ") + std::to_string(errno) +
+                                                  " (" + std::strerror(errno) + ")");
+  if (pipeRc == 0)
+  {
+    close(fds[0]);
+    close(fds[1]);
+  }
+
   // 4. name resolution
   addrinfo hints{};
   hints.ai_family = AF_UNSPEC;

@@ -302,6 +302,12 @@ void CWinSystemPS5GLContext::PresentRender(bool rendered, bool videoLayer)
   if (!m_bRenderCreated)
     return;
 
+  double renderMs = 0.0; // kodi-debug: the frame's cost, before the pacer's wait
+  if (m_stats && m_frameStart.time_since_epoch().count() != 0)
+    renderMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                        m_frameStart)
+                   .count();
+
   if (rendered || videoLayer)
   {
     m_hdr.Pack(m_nWidth, m_nHeight); // HDR: the packed 10-bit words into the real framebuffer
@@ -342,12 +348,8 @@ void CWinSystemPS5GLContext::PresentRender(bool rendered, bool videoLayer)
       ++m_statFrames;
       if (rendered)
         ++m_statGuiFrames;
-      if (m_frameStart.time_since_epoch().count() != 0)
-      {
-        const double ms = std::chrono::duration<double, std::milli>(now - m_frameStart).count();
-        m_statRenderMs += ms;
-        m_statRenderMaxMs = std::max(m_statRenderMaxMs, ms);
-      }
+      m_statRenderMs += renderMs;
+      m_statRenderMaxMs = std::max(m_statRenderMaxMs, renderMs);
       if (m_statWindow.time_since_epoch().count() == 0)
         m_statWindow = now;
       const double seconds = std::chrono::duration<double>(now - m_statWindow).count();

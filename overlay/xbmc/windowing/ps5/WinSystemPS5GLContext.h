@@ -74,6 +74,8 @@ public:
   float GetFrameLatencyAdjustment() override;
 
   // HDR output for PQ video (HdrOutputPS5): Kodi's HDR and GUI-compositing hooks
+  // no plane-role model here (GBM's flip-flop): the surface is always right
+  bool SetVideoOutput(const VideoPicture* videoPicture) override { return true; }
   bool SetHDR(const VideoPicture* videoPicture) override;
   bool IsHDRDisplay() override;
   bool SetGuiCompositing(int colorTransfer) override;

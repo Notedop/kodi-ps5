@@ -105,9 +105,9 @@ folder itself (`/data/homebrew/PPSA99420/kodi`).
 - **Hardware decoding** of HEVC 4:2:2/4:4:4 and 12-bit video: FFmpeg decodes
   them, which is slow at high resolutions. H.264 High 10 is offered to the
   hardware decoder and falls back to FFmpeg if the decoder refuses it.
-- **Two frames in flight** (pipeline depth 2) for every hardware-decoded video:
-  new, since depth 1 measured just short of real time at 4K60. Any stutter or
-  frame-order oddity in the logs points here first.
+- **4K60 with 10-bit video** may stutter: the 10-bit codecs run the decoder
+  at pipeline depth 1 (8-bit codecs use depth 4, the configuration EVO Player
+  validated; depth 2 showed pictures before the decoder had finished them).
 - **Fixed 24/25/50 Hz output:** the PS5 refuses explicit refresh rates from
   titles, so without VRR everything plays at 59.94 Hz.
 - **Dolby/DTS passthrough** (including TrueHD and DTS-HD at 8 channels and

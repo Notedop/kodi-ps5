@@ -278,10 +278,14 @@ bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& 
   // VP9 surfaces are exactly the frame size (the research's proven modes)
   config.maxHeight = vp9 ? (uhd ? 2160 : 1080) : (uhd ? 2176 : 1088);
   config.maxDpbFrames = 16;
-  // Two frames in flight (4K60 VP9 measured just over the frame budget at
-  // depth one; the codec copes with the output latency).
+  // Pipeline depth: the picture returned by a decode call is the one that
+  // entered the pipeline `depth` calls ago. At depth 2 it can still be
+  // finishing on the GPU when the zero-copy path shows it (black regions that
+  // fill in later: measured on H.264). EVO Player's validated configuration
+  // is depth 4 for the 8-bit codecs (the returned picture is three calls old
+  // and complete) and depth 1 for the 10-bit ones, so that is what this uses.
   (void)fps;
-  config.pipelineDepth = 2;
+  config.pipelineDepth = m_tenBit ? 1 : 4;
   config.computeQueue = reinterpret_cast<uint64_t>(m_computeQueue);
   config.cpuAffinity = 0x3f;
   config.cpuPriority = 700;
