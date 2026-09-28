@@ -27,6 +27,7 @@
 #include <curl/curl.h>
 #undef CURL
 #include <netdb.h>
+#include <netinet/in.h>
 #include <openssl/crypto.h>
 #include <openssl/rand.h>
 #include <sys/socket.h>
