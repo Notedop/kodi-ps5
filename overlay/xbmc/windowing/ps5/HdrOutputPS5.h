@@ -9,14 +9,15 @@
 #pragma once
 
 /*
- * HDR output on the PS5, for HDR10 (PQ, BT.2020) video.
+ * HDR output on the PS5, for HDR10 (PQ) and HLG video (BT.2020).
  *
  * The scanout buffers are switched to the platform's HDR 10-bit format
  * (2:10:10:10 PQ; GL driver addition, in place via
  * sceVideoOutSubmitChangeBufferAttribute2) while such a video plays, and back
  * to SDR afterwards. Kodi's GL renderer then delivers the video's PQ-coded
- * BT.2020 RGB unchanged (HDR passthrough) and composites the GUI in PQ (its
- * GUI-compositing path, as Kodi's Linux GL window system implements it).
+ * BT.2020 RGB unchanged (HDR passthrough; HLG is converted to PQ in the
+ * shader, patch 0014) and composites the GUI in PQ (its GUI-compositing path,
+ * as Kodi's Linux GL window system implements it).
  *
  * The GL framebuffer stays 8-bit BGRA. While HDR is active, Kodi's frame is
  * rendered into a 10-bit intermediate framebuffer (the "default framebuffer"
@@ -44,6 +45,8 @@ public:
   // Kodi's window-system hooks
   bool SetHDR(const VideoPicture* picture); // true: PQ passthrough active
   bool IsActive() const { return m_active; }
+  bool ConvertsHlg() const { return m_active && m_hlg; }
+  bool IsGuiCompositing() const { return m_guiCompositing; }
   bool SetGuiCompositing(int colorTransfer, bool limitedColor);
   bool BeginGuiComposite(bool guiWillRender, int width, int height, bool depth);
   void EndGuiComposite();
@@ -62,6 +65,7 @@ private:
   void SwitchScanout(bool hdr);
 
   bool m_active = false;   // scanout in the HDR format, frame packed
+  bool m_hlg = false;      // the video is HLG: converted to PQ in the shader
   bool m_hdrScanout = false;
   GLuint m_fbo = 0;        // RGB10_A2 + depth intermediate target
   GLuint m_texture = 0;

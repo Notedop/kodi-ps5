@@ -61,5 +61,9 @@ constexpr uint64_t kScanoutFormatHdr = UINT64_C(0x8100070422000000);
 // attempted). 0 if the format is in effect; -1 if the driver lacks the addition.
 int SetScanoutFormat(uint64_t format, int32_t results[4]);
 bool ScanoutFormatSwitchAvailable(); // this build of the GL driver has the addition
+// Whether the display link currently runs in HDR (the PS5's HDR setting and
+// the TV): sceVideoOutGetOutputStatus, layout as verified by EVO Player /
+// SharpProspero. Logs the first reading and every change.
+bool IsDisplayHdr();
 std::string DescribeScanoutResults(const int32_t results[4]);
 } // namespace KODI::PLATFORM::PS5

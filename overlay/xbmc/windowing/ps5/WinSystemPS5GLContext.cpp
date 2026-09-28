@@ -8,6 +8,7 @@
 
 #include "WinSystemPS5GLContext.h"
 
+#include "platform/ps5/SandboxPS5.h"
 #include "platform/ps5/VideoOutInfo.h"
 #include "settings/DisplaySettings.h"
 
@@ -218,8 +219,34 @@ void CWinSystemPS5GLContext::SetVSyncImpl(bool enable)
   m_eglContext.SetVSync(enable);
 }
 
+float CWinSystemPS5GLContext::GetDisplayLatency()
+{
+  const float pace = VrrTargetRate();
+  if (pace <= 0.0f)
+    return -1.0f; // Kodi's estimate for fixed-rate output
+  return 1000.0f / pace; // the flip after the paced present
+}
+
+float CWinSystemPS5GLContext::GetFrameLatencyAdjustment()
+{
+  // this frame's wait for its pacing tick, so a frame due later is chosen
+  // (negative: added to the latency)
+  const float pace = VrrTargetRate();
+  if (pace <= 0.0f || m_nextVrrPresent.time_since_epoch().count() == 0)
+    return 0.0f;
+  const double period = 1000.0 / static_cast<double>(pace);
+  const double wait = std::chrono::duration<double, std::milli>(m_nextVrrPresent -
+                                                                 std::chrono::steady_clock::now())
+                          .count();
+  if (wait <= 0.0 || wait > period)
+    return 0.0f; // the pacer re-anchors: no extra wait
+  return static_cast<float>(-wait);
+}
+
 bool CWinSystemPS5GLContext::BeginRender()
 {
+  if (m_stats)
+    m_frameStart = std::chrono::steady_clock::now();
   const bool ok = CRenderSystemGL::BeginRender();
   m_hdr.BindTarget(m_nWidth, m_nHeight); // HDR: the frame renders into the 10-bit target
   return ok;
@@ -232,7 +259,21 @@ bool CWinSystemPS5GLContext::SetHDR(const VideoPicture* videoPicture)
 
 bool CWinSystemPS5GLContext::IsHDRDisplay()
 {
-  return KODI::PLATFORM::PS5::ScanoutFormatSwitchAvailable();
+  // HDR only when the link really runs in HDR; otherwise Kodi tone maps
+  return KODI::PLATFORM::PS5::ScanoutFormatSwitchAvailable() &&
+         KODI::PLATFORM::PS5::IsDisplayHdr();
+}
+
+CHDRCapabilities CWinSystemPS5GLContext::GetDisplayHDRCapabilities() const
+{
+  // what Kodi can output here: HDR10 natively, HLG converted to PQ
+  CHDRCapabilities caps;
+  if (KODI::PLATFORM::PS5::ScanoutFormatSwitchAvailable())
+  {
+    caps.SetHDR10();
+    caps.SetHLG();
+  }
+  return caps;
 }
 
 bool CWinSystemPS5GLContext::SetGuiCompositing(int colorTransfer)
@@ -265,8 +306,6 @@ void CWinSystemPS5GLContext::PresentRender(bool rendered, bool videoLayer)
   {
     m_hdr.Pack(m_nWidth, m_nHeight); // HDR: the packed 10-bit words into the real framebuffer
 
-    UpdateHdrScanoutProbe(); // kodi-probe-hdr: back to SDR after 3 seconds
-
     // the system may switch the output onto (or off) its VRR link at any time
     if (m_videoOutLogged)
     {
@@ -297,6 +336,34 @@ void CWinSystemPS5GLContext::PresentRender(bool rendered, bool videoLayer)
       CEGLUtils::Log(LOGERROR, "eglSwapBuffers failed");
       throw std::runtime_error("eglSwapBuffers failed");
     }
+    if (m_stats) // kodi-debug: what reaches the display, and what a frame costs
+    {
+      const auto now = std::chrono::steady_clock::now();
+      ++m_statFrames;
+      if (rendered)
+        ++m_statGuiFrames;
+      if (m_frameStart.time_since_epoch().count() != 0)
+      {
+        const double ms = std::chrono::duration<double, std::milli>(now - m_frameStart).count();
+        m_statRenderMs += ms;
+        m_statRenderMaxMs = std::max(m_statRenderMaxMs, ms);
+      }
+      if (m_statWindow.time_since_epoch().count() == 0)
+        m_statWindow = now;
+      const double seconds = std::chrono::duration<double>(now - m_statWindow).count();
+      if (seconds >= 5.0)
+      {
+        CLog::Log(LOGINFO,
+                  "PS5 presentation (kodi-debug): {:.1f} frames/s ({:.1f}/s with GUI content), "
+                  "paced at {:.3f} Hz, {}, render {:.1f} ms average / {:.1f} ms longest",
+                  m_statFrames / seconds, m_statGuiFrames / seconds, VrrTargetRate(),
+                  VrrTargetRate() > 0.0f ? "VRR link" : "fixed-rate output",
+                  m_statFrames ? m_statRenderMs / m_statFrames : 0.0, m_statRenderMaxMs);
+        m_statFrames = m_statGuiFrames = 0;
+        m_statRenderMs = m_statRenderMaxMs = 0.0;
+        m_statWindow = now;
+      }
+    }
     // The driver opens the video output with the first presented frame:
     // then report it and adopt the system's real refresh rate (e.g. 59.94).
     if (!m_videoOutLogged)
@@ -307,6 +374,9 @@ void CWinSystemPS5GLContext::PresentRender(bool rendered, bool videoLayer)
         EnsureSystemMode();
         ApplySystemRefreshRate(KODI::PLATFORM::PS5::QueryRefreshRate());
         DetectOutputModes();
+        // /data and USB drives: the sandbox may be opened only now - graphics
+        // and VideoOut cannot be brought up after that (EVO Player's findings)
+        KODI::PLATFORM::PS5::RequestSandboxOpen();
         unsigned sysWidth = 0, sysHeight = 0;
         if (KODI::PLATFORM::PS5::QuerySystemResolution(sysWidth, sysHeight))
         {

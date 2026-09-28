@@ -59,6 +59,17 @@ int sceVideoOutConfigureOutput(int32_t handle, uint32_t mode, const void*, const
 int sceVideoOutWaitVblank(int32_t handle);
 int sceVideoOutGetVblankStatus(int32_t handle, void* status);
 int ps5_opengl_video_out_handle(void);
+// output status: resolution, dynamic range (0 unknown, 1 SDR, 2 HDR), refresh
+// rate, flags (bit 0: HDR output active), reserved
+struct VideoOutOutputStatus
+{
+  uint32_t resolution;
+  uint32_t dynamicRange;
+  uint64_t refreshRate;
+  uint64_t flags;
+  uint64_t reserved[3];
+};
+int32_t sceVideoOutGetOutputStatus(int32_t handle, VideoOutOutputStatus* status);
 // patches/ps5-opengl/kodi-additions.py (HDR part); weak: absent in older drivers
 int ps5_opengl_set_scanout_format(uint64_t pixel_format, int32_t results[4]) __attribute__((weak));
 }
@@ -183,6 +194,24 @@ int KODI::PLATFORM::PS5::SetScanoutFormat(uint64_t format, int32_t results[4])
 bool KODI::PLATFORM::PS5::ScanoutFormatSwitchAvailable()
 {
   return ps5_opengl_set_scanout_format != nullptr;
+}
+
+bool KODI::PLATFORM::PS5::IsDisplayHdr()
+{
+  static int last = -1;
+  const int32_t handle = ps5_opengl_video_out_handle();
+  if (handle < 0)
+    return false;
+  VideoOutOutputStatus status{};
+  const int32_t rc = sceVideoOutGetOutputStatus(handle, &status);
+  const bool hdr = rc == 0 && (status.dynamicRange == 2 || (status.flags & 1));
+  if (static_cast<int>(hdr) != last)
+  {
+    last = hdr;
+    CLog::Log(LOGINFO, "PS5 display: {} (output status {:#x}, dynamic range {}, flags {:#x})",
+              hdr ? "HDR" : "SDR", static_cast<uint32_t>(rc), status.dynamicRange, status.flags);
+  }
+  return hdr;
 }
 
 std::string KODI::PLATFORM::PS5::DescribeScanoutResults(const int32_t results[4])

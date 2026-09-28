@@ -1,6 +1,7 @@
-ps5: refresh-rate selection = VRR during playback (with On start/stop), the
-lowest multiple of the frame rate within 48-120 Hz; otherwise the system rate.
-Replaces 0010's fixed-rate rule.
+ps5: refresh-rate selection = a VRR mode for the video - the lowest multiple of
+its frame rate within 48-120 Hz - whenever "Adjust display refresh rate" is
+not Off; when Kodi switches and switches back stays Kodi's (On start/stop,
+Always, On start). Replaces 0010's fixed-rate rule.
 
 --- a/xbmc/windowing/Resolution.cpp	2026-09-26 16:22:53.640703605 +0000
 +++ b/xbmc/windowing/Resolution.cpp	2026-09-26 16:23:25.997334337 +0000
@@ -17,23 +18,23 @@ Replaces 0010's fixed-rate rule.
 -  // would otherwise take 59.94 Hz for a 2160p 24p film). Within 0.15%: 24.000
 -  // fps takes 119.88 Hz and 60.000 fps 59.94 Hz ("Sync playback to display",
 -  // when on, absorbs the 0.1%; the output rate never depends on it).
-+  // PS5: the output runs at the system rate (the desktop mode). Only with
-+  // "Adjust display refresh rate: On start/stop" does a video get a VRR mode
-+  // (registered by the window system as "(PS5 VRR)"): the lowest multiple of
-+  // its frame rate that reaches the PS5's VRR minimum of 48 Hz (23.976 ->
-+  // 71.928, 24 -> 48, 25 -> 50, 29.97 -> 59.94), up to 120 Hz. Anything else
-+  // keeps the system rate; fixed-rate modes other than the desktop are never
-+  // chosen. "Sync playback to display" plays no part in this.
++  // PS5: the output runs at the system rate (the desktop mode). A video gets
++  // a VRR mode ("(PS5 VRR)", registered by the window system) whenever Kodi
++  // asks for its best mode - "Adjust display refresh rate" not Off: the lowest
++  // multiple of its frame rate reaching the PS5's VRR minimum of 48 Hz (23.976
++  // -> 71.928, 24 -> 48, 25 -> 50, 29.97 -> 59.94), up to 120 Hz. Otherwise
++  // the system rate; fixed-rate modes other than the desktop are never chosen.
++  // "Sync playback to display" plays no part in this.
    {
      const RESOLUTION_INFO desktop =
          CServiceBroker::GetWinSystem()->GetGfxContext().GetResInfo(RES_DESKTOP);
 -    CLog::Log(LOGDEBUG,
 -              "[WHITELIST] Searching for a desktop-size mode at an integer multiple of {} fps", fps);
 -    for (int multiple = 1; multiple <= 5; ++multiple)
-+    const bool startStop = CServiceBroker::GetSettingsComponent()->GetSettings()->GetInt(
-+                               CSettings::SETTING_VIDEOPLAYER_ADJUSTREFRESHRATE) ==
-+                           ADJUST_REFRESHRATE_ON_STARTSTOP;
-+    if (startStop && fps > 0.0f)
++    const bool adjust = CServiceBroker::GetSettingsComponent()->GetSettings()->GetInt(
++                            CSettings::SETTING_VIDEOPLAYER_ADJUSTREFRESHRATE) !=
++                        ADJUST_REFRESHRATE_OFF;
++    if (adjust && fps > 0.0f)
      {
 -      for (const auto& mode : indexList)
 +      int multiple = 1;

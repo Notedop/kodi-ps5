@@ -11,7 +11,6 @@
 #include "threads/CriticalSection.h"
 #include "windowing/WinSystem.h"
 
-#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -69,8 +68,8 @@ public:
   void DetectOutputModes();
 
   // Kodi selected a display mode: the desktop mode (the system rate) or one of
-  // the "(PS5 VRR)" modes, which Kodi requests only through "Adjust display
-  // refresh rate: On start/stop" during playback. Returns the rate in effect.
+  // the "(PS5 VRR)" modes, which Kodi requests for a video through "Adjust
+  // display refresh rate" (any setting but Off). Returns the rate in effect.
   float SwitchOutputRate(const RESOLUTION_INFO& res);
 
   // Back to the system's own mode (on exit).
@@ -79,12 +78,6 @@ public:
   // Re-read whether the output is a VRR link (after any mode change).
   void RefreshLinkState();
 
-  // kodi-probe-hdr: scanout buffers in the HDR format for a few seconds while
-  // presenting (the picture is wrong meanwhile: 8-bit data read as 10-bit)
-  void StartHdrScanoutProbe();
-  void UpdateHdrScanoutProbe();
-  std::chrono::steady_clock::time_point m_hdrProbeEnd{};
-  bool m_hdrProbeActive = false;
   std::string PacingDescription() const;
 
   // The output's refresh rate as set up (the VRR target during VRR).

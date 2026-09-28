@@ -32,8 +32,9 @@ enum class VideoDec2Codec
   H264,
   HEVC,
   HEVCMain10,
-  VP9,         // Profile 0 (8-bit)
-  VP9Profile2, // 10-bit
+  VP9,          // Profile 0 (8-bit)
+  VP9Profile2,  // 10-bit
+  H264High10,   // tried on the hardware; refused -> FFmpeg
 };
 
 struct VideoDec2Picture
@@ -44,6 +45,7 @@ struct VideoDec2Picture
   uint32_t pitch = 0;  // bytes per row, both planes
   uint32_t bitDepth = 8; // 8: NV12; 10: 16 bits per sample, semi-planar
   int frameIndex = -1;   // pooled mode: the frame to hand back with ReleaseFrame
+  bool immediate = false; // came out of the frame offered with this access unit
 };
 
 class CVideoDec2
@@ -53,6 +55,10 @@ public:
   ~CVideoDec2();
   CVideoDec2(const CVideoDec2&) = delete;
   CVideoDec2& operator=(const CVideoDec2&) = delete;
+
+  // The video decoder system module, loaded once (call at start-up, before
+  // the sandbox is opened); negative on failure.
+  static int32_t LoadModule();
 
   // Pooled mode (zero-copy video): a frame returned as a picture stays out of
   // the decoder's reach until ReleaseFrame. Set before Open.
@@ -66,8 +72,10 @@ public:
   bool HasFreeFrame() const;
 
   // Sets up memory, compute queue and decoder for streams up to width x height.
+  // fps: above 30 at 4K the decoder gets two frames in flight (pipeline
+  // depth 2), where depth 1 is just short of real time.
   bool Open(VideoDec2Codec codec, int width, int height, std::string& error,
-            bool interlaced = false);
+            bool interlaced = false, float fps = 0.0f);
   void Close();
 
   // Decode one access unit (Annex-B). Returns false on a decoder error.

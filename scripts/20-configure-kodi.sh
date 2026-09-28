@@ -112,11 +112,26 @@ esac
 exec "$PS5_PAYLOAD_SDK/bin/prospero-pkg-config" "\$@"
 WRAP
 chmod +x "$BUILD/kodi-pkg-config"
+# Python add-ons: on once scripts/19-build-python.sh has installed CPython
+# into the sysroot. Kodi's bindings generator then needs SWIG and a Java
+# runtime on the build machine (scripts/00-setup-wsl.sh installs them).
+PY_ROOT="$PS5_PAYLOAD_SDK/target/user/homebrew"
+if [ -f "$PY_ROOT/lib/libpython3.14.a" ]; then
+  command -v swig >/dev/null && command -v java >/dev/null || {
+    echo "!! Python is installed, but Kodi's bindings need swig and java: sudo apt-get install -y swig default-jre-headless"
+    exit 1; }
+  PYTHON_ARGS=(-DENABLE_PYTHON=ON -DPYTHON_PATH=/user/homebrew -DPYTHON_VER=3.14
+               -DPython3_USE_STATIC_LIBS=ON)
+  echo "==> Python 3.14 found in the sysroot: Python add-ons enabled"
+else
+  PYTHON_ARGS=(-DENABLE_PYTHON=OFF)
+fi
+
 # CMake caches pkg-config results; FFmpeg's link flags must be re-read every
 # configure, or a rebuilt FFmpeg (new dependencies such as dav1d) links with
 # the flags of the old one and kodi.bin fails with undefined symbols.
 cmake -S "$KODI_SRC" -B "$BUILD" -G Ninja \
-  -U "FFMPEG_*" \
+  -U "FFMPEG_*" -U "Python3_*" -U "PYTHON_*" \
   -DCMAKE_TOOLCHAIN_FILE="$HERE/toolchain/ps5-kodi.cmake" \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE:-Release}" \
   -DCMAKE_C_FLAGS_RELEASE="-O2 -g -DNDEBUG" \
@@ -128,7 +143,7 @@ cmake -S "$KODI_SRC" -B "$BUILD" -G Ninja \
   -DPKG_CONFIG_EXECUTABLE="$BUILD/kodi-pkg-config" \
   -DINTERNAL_TEXTUREPACKER_INSTALLABLE=FALSE \
   -DENABLE_INTERNAL_FFMPEG=OFF \
-  -DENABLE_PYTHON=OFF \
+  "${PYTHON_ARGS[@]}" \
   -DENABLE_TESTING=OFF \
   -DVERBOSE_FIND=ON \
   "$@"

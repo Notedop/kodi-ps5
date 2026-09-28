@@ -14,4 +14,7 @@
 namespace KODI::PLATFORM::PS5
 {
 unsigned int DefaultFramebuffer();
+// HDR output active for HLG video: the GL YUV shader converts HLG to PQ
+// (patch 0014), since the PS5's HDR scanout is PQ only.
+bool HdrOutputConvertsHlg();
 }

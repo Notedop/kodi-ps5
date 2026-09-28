@@ -29,10 +29,18 @@ is installed with ShadowMountPlus or a compatible loader.
 
 Ready-to-install builds are on the [releases page](https://github.com/VivaLaVent/kodi-ps5/releases).
 
-**You need** a jailbroken PS5 with a HEN (etaHEN or equivalent), ShadowMountPlus
-(or a compatible folder-title loader), and an FTP server on the console. Tested
-on firmware 10.01 (etaHEN + ShadowMountPlus + kstuff) and reported working on
-4.03 (ItemzFlow + etaHEN 2.3b).
+**Required on the console:**
+
+- a HEN that gives homebrew kernel access, such as **etaHEN**;
+- **ShadowMountPlus** (or a compatible folder-title loader), to register and
+  mount the title folder;
+- an **FTP server**, to copy the files (most HEN setups start one, usually on
+  port 2121).
+
+**Optional:**
+
+- **PS5-Lapy-JB-Daemon**, for USB drives and `/data` (see *USB drives* below);
+- **klogsrv**, to capture Kodi's log over the network (see *Debugging*).
 
 1. Extract the release zip into `/data/homebrew/` on the console over FTP; it
    creates `/data/homebrew/PPSA99420/`.
@@ -41,24 +49,75 @@ on firmware 10.01 (etaHEN + ShadowMountPlus + kstuff) and reported working on
    protocol **Windows network (SMB)** or **NFS**, and enter the server's **IP
    address** (Windows/NetBIOS names are not resolved). SMB2 and SMB3 work, SMB1 does not.
 
-For updates, usually only `eboot.bin` changes (plus `sce_sys/` when the title
+### USB drives
+
+A title runs in a sandbox that hides USB drives and `/data`. A resident
+jailbreak daemon can open it on request, and Kodi asks by itself right after
+start-up:
+
+1. Load the **PS5-Lapy-JB-Daemon** payload once per console boot, **before**
+   starting Kodi - with your payload loader, or automatically through its
+   autoload list. etaHEN answers the same request where its
+   jailbreak-on-demand is available.
+2. Plug in a drive formatted **exFAT** or **FAT32**.
+3. Start Kodi. The log reports `PS5 sandbox: opened by the jailbreak daemon`,
+   and the drive shows up as a source (*Videos → Files → Add videos… → Browse*,
+   under `/mnt/usb0` …, internal storage under `/data`).
+
+Without a daemon, Kodi runs as before with network sources only. The request is
+a file (`{"PID":"<pid>"}` in the title's `/download0/etahen_jailbreak`), which
+the daemon consumes.
+
+### Updating
+
+**Close Kodi before replacing its files** over FTP: overwriting a running
+title's files can crash the console. Usually only `eboot.bin` changes (plus `sce_sys/` when the title
 metadata changes, `share/` when Kodi's data files change). Kodi keeps its data in
 `/data/kodi` when the loader lets a title reach `/data`, otherwise in the title
 folder itself (`/data/homebrew/PPSA99420/kodi`).
 
-## What works, what doesn't yet
+## What works
 
-| Works | Not yet |
-| --- | --- |
-| Estuary GUI rendered natively at 3840x2160 (OpenGL 4.6 on the PS5 GPU) | H.264 High 10 and HEVC 4:2:2/4:4:4 in hardware (FFmpeg takes them) |
-| Hardware video decoding (VideoDec2): H.264, HEVC Main and **Main 10**, **VP9 Profile 0 and 2**; shown **zero-copy** (the GPU reads the decoder's frames directly) | HLG output (tone mapped, as on an SDR display) |
-| Everything else in FFmpeg, including **AV1** (dav1d) | Fixed 24/25/50 Hz output modes (the PS5 refuses explicit rates from titles) |
-| **HDR10 output** while PQ video plays (BT.2020 PQ 10-bit scanout, GUI composited in PQ) | VRR with the PS5's VRR setting off |
-| Menus at 60 Hz; **VRR during playback** matched to the video's frame rate | Internet access via curl (add-on repository, online streams) |
-| Interlaced streams decoded in hardware and deinterlaced with bwdif | Python add-ons (Python is not built yet) |
-| Audio: 5.1/7.1 PCM (48 kHz, 8 channels); Dolby/DTS passthrough offered to Kodi's *Allow passthrough* | Binary add-ons (no `dlopen` in a title) |
-| SMB2/3 and NFS network sources, UPnP; thumbnails, databases, settings | Listing under the Media tab (the GL driver fails in that sandbox) |
-| DualSense navigation (as keyboard events) | The player debug overlay (L3) during VRR raises the rate to ~120 Hz |
+- **Interface:** Kodi's Estuary skin, rendered natively at 3840x2160 with
+  OpenGL 4.6 on the PS5's GPU.
+- **Hardware video decoding** on the console's decoder: H.264 (8-bit), HEVC
+  Main and Main 10, VP9 Profile 0 and 2 - shown zero-copy (the GPU reads the
+  decoder's frames directly). Interlaced streams (1080i TV recordings) are
+  decoded in hardware and deinterlaced with bwdif.
+- **Everything else in software** (FFmpeg), including AV1 (dav1d; Dolby Vision
+  profile 10 files are AV1).
+- **HDR output** for HDR10 (PQ) and HLG video when the TV link runs in HDR: a
+  10-bit BT.2020 PQ picture (HLG converted to PQ in the shader), with Kodi's
+  on-screen display composited into it.
+- **VRR during playback**, matched to the video's frame rate; the menus at
+  60 Hz (see *Display*).
+- **Audio:** stereo, 5.1 and 7.1 PCM to the console (8-channel port).
+- **Sources:** SMB2/3 and NFS network shares, UPnP; USB drives and `/data`
+  with PS5-Lapy-JB-Daemon loaded (see *USB drives*).
+- **Library:** thumbnails, databases and settings persist between sessions.
+- **DualSense** navigation (buttons mapped to Kodi's keyboard actions).
+
+## What doesn't yet
+
+- **Internet access** (add-on repository, scrapers, online streams): in progress.
+- **Add-ons with code:** Python add-ons (Python is not built yet) and binary
+  add-ons (a title cannot load libraries at run time).
+- **Hardware decoding** of HEVC 4:2:2/4:4:4 and 12-bit video: FFmpeg decodes
+  them, which is slow at high resolutions. H.264 High 10 is offered to the
+  hardware decoder and falls back to FFmpeg if the decoder refuses it.
+- **Two frames in flight** (pipeline depth 2) for every hardware-decoded video:
+  new, since depth 1 measured just short of real time at 4K60. Any stutter or
+  frame-order oddity in the logs points here first.
+- **Fixed 24/25/50 Hz output:** the PS5 refuses explicit refresh rates from
+  titles, so without VRR everything plays at 59.94 Hz.
+- **Dolby/DTS passthrough** (including TrueHD and DTS-HD at 8 channels and
+  192 kHz): offered to Kodi's *Allow passthrough*, but not yet confirmed to
+  reach a receiver intact.
+- **DualSense as a game controller** (joystick add-on) and the on-screen
+  keyboard.
+- **The Media tab:** Kodi is a Games title (the GL driver fails in the Media
+  category's sandbox).
+- **The player debug overlay (L3)** raises the output to ~120 Hz during VRR.
 
 ## Settings that matter
 
@@ -71,8 +130,10 @@ decide the output:
 | PS5 **VRR** | Kodi *Adjust display refresh rate* | Menus | During a video |
 | --- | --- | --- | --- |
 | Off | any | 59.94 Hz fixed | 59.94 Hz fixed |
-| On | Off, Always or On start | 60 Hz (paced on the VRR link) | 60 Hz |
-| On | **On start/stop** | 60 Hz | **VRR at the video's rate** (table below) |
+| On | Off | 60 Hz (paced on the VRR link) | 60 Hz |
+| On | **On start/stop** | 60 Hz | **VRR at the video's rate** until it stops, also with the menus on top |
+| On | **Always** | 60 Hz | **VRR at the video's rate** while it is fullscreen; 60 Hz with the menus on top |
+| On | **On start** | 60 Hz until the first video | **VRR at the video's rate**, kept after it stops (Kodi does not switch back) |
 
 With the PS5's VRR on, the system runs Kodi on a VRR link and the TV refreshes
 whenever Kodi presents a frame. Kodi paces its frames: 59.94 per second in the
@@ -88,14 +149,17 @@ PS5's VRR range of 48–120 Hz:
 | 50 / 59.94 / 60 fps | 50 / 59.94 / 60 Hz | each 1× |
 
 Every frame is on screen equally long: no 3:2 judder, no speed change.
-Stopping the video returns to 60 Hz.
+Stopping the video returns to 60 Hz (with *On start*, Kodi keeps the video's
+rate until the next video).
 
 - **Enable 120 Hz Output** on the PS5 should be **Automatic**: the system
   builds its VRR link from the high-refresh mode Kodi declares.
 - **HDR.** The title declares HDR capability, so with the PS5's HDR at *On When
   Supported* the TV runs in HDR for the whole session: the PS5 maps the menus
   and SDR video into the HDR signal itself (brightness per its *Adjust HDR*
-  calibration), and Kodi outputs HDR10 (PQ) video natively. For an SDR title
+  calibration), and Kodi outputs HDR10 (PQ) video natively and HLG converted
+  to PQ - whenever the display link actually runs in HDR (read from VideoOut).
+  For an SDR title
   instead, build with `KODI_HDR_TITLE=0 bash scripts/30-deploy.sh` (or set the
   PS5's HDR to *Off*): the TV stays SDR and HDR video is tone mapped by Kodi
   (video OSD: *Tone mapping*).
@@ -111,8 +175,9 @@ Stopping the video returns to 60 Hz.
 ### Audio
 
 Set *Settings → System → Audio → Number of channels* to **5.1** or **7.1** for
-surround tracks; Kodi's default of 2.0 downmixes them (without the LFE). The PS5
-downmixes further to what the display or receiver takes.
+surround tracks; Kodi's default of 2.0 downmixes them (without the LFE). Kodi
+opens an 8-channel port in the console's channel order (FL FR FC LFE BL BR SL
+SR); the PS5 downmixes further to what the display or receiver takes.
 
 Dolby Digital, Dolby Digital Plus and DTS **passthrough** is offered to Kodi's
 *Allow passthrough* setting (off by default) as IEC 61937 inside PCM. It needs
@@ -124,25 +189,20 @@ plays them as noise.
 
 Create an empty file with one of these names in `/data/homebrew/PPSA99420/` and
 start Kodi. The console protects files a title creates from outside processes,
-so FTP cannot delete Kodi's data; the first two let Kodi do it.
+so FTP cannot delete Kodi's data; the first two let Kodi do it. There are no
+feature switches: this is an alpha, every feature is on, and the logs decide
+what gets fixed.
 
 | File | Effect |
 | --- | --- |
 | `kodi-reset` | wipe Kodi's data once, then start fresh |
 | `kodi-uninstall` | wipe Kodi's data and quit; the title folder can then be deleted over FTP |
 | `kodi-debug` | debug-level logging (slower; remove when done) |
-| `kodi-swdecode` | software (FFmpeg) video decoding only, no hardware decoder |
-| `kodi-no-zerocopy` | show video through the copying path instead of zero-copy (troubleshooting: flicker, black video) |
-| `kodi-no-hdr` | keep the scanout SDR for HDR video too (Kodi then tone maps, if *Tone mapping* is set in the video OSD) |
-| `kodi-stereo-only` | a 2-channel audio port and no passthrough offered |
-| `kodi-multichannel-alt` | the other 8-channel order, if side and back speakers come out swapped |
-| `kodi-hw-pipeline2` | *(experiment)* hardware decoder with two frames in flight, for 4K60 VP9/HEVC that stutters at the default depth of one; `kodi-debug` logs decode times every 5 seconds |
-| `kodi-probe-hdr` | *(probe, for HDR development)* after start-up, switch the scanout buffers to the HDR format for 3 seconds and log the result |
 
 ## Building
 
 Kodi is not forked. This repository is an **overlay**: a `ps5` platform directory
-copied on top of a stock Kodi checkout, thirteen small Kodi patches, C shims that
+copied on top of a stock Kodi checkout, fourteen small Kodi patches, C shims that
 fill gaps in what a title's system libraries provide, and the scripts that set
 up the cross toolchain, configure, build and package.
 
@@ -172,6 +232,7 @@ bash scripts/15-build-dav1d.sh           # dav1d AV1 decoder (needs nasm on the 
 bash scripts/16-build-ffmpeg.sh          # FFmpeg 7.1 with libdav1d (Kodi needs >= 7.1)
 bash scripts/17-build-sce-stubs.sh       # link stubs: libSceVideodec2, extended libSceVideoOut
 bash scripts/18-build-ps5-opengl.sh      # ps5-opengl SDK with Kodi's additions (patches/ps5-opengl)
+bash scripts/19-build-python.sh          # optional: static CPython 3.14 -> Python add-ons (needs swig, java)
 
 # 3. Configure (applies overlay + patches), build, package
 bash scripts/20-configure-kodi.sh
@@ -198,8 +259,8 @@ overlay/                        copied onto a Kodi checkout by scripts/20-config
     video/                      hardware decoder (CVideoDec2, CDVDVideoCodecPS5), zero-copy buffers and renderer
     sce/                        clean-room prototypes of the Sony libraries used
   xbmc/windowing/ps5/           CWinSystemPS5, CWinSystemPS5GLContext (EGL), VRR pacing, HDR output
-patches/kodi/                   thirteen Kodi patches (charset, SMB hooks, log sink, renderer, refresh, HDR framebuffer) + manifest
-patches/ps5-opengl/             Kodi's additions to the GL driver/runtime (zero-copy textures, HDR scanout switch)
+patches/kodi/                   fourteen Kodi patches (charset, SMB hooks, log sink, renderer, refresh, HDR framebuffer, HLG shader) + manifest
+patches/ps5-opengl/             Kodi's additions to the GL driver/runtime (zero-copy textures, HDR scanout switch), written against the ps5-opengl revision in PS5-OPENGL-COMMIT
 patches/                        fix for older native-app template converters
 shims/native-app/               C library gaps, compiled into the title
 shims/libuuid/ shims/libprocstat/   minimal libraries for crossguid and exiv2
@@ -219,6 +280,7 @@ title/sce_sys/                  Kodi's icon
 | Video decoding | `CDVDVideoCodecPS5` on the hardware decoder (libSceVideodec2). Frames are shown zero-copy: GL textures lie over the decoder's frames (driver additions), a frame returns to the decoder when Kodi releases the picture. 10-bit output arrives lower-aligned in 16-bit words |
 | HDR output | for PQ video the scanout buffers switch to the platform's HDR 10-bit format in place (`sceVideoOutSubmitChangeBufferAttribute2`); Kodi renders into a 10-bit target that a final pass packs into the 8-bit framebuffer; the GUI is composited in PQ with Kodi's own compositing path |
 | Display timing | the system rate (59.94 Hz) always; on the PS5's VRR link Kodi paces presentation, at the video's VRR rate during playback |
+| A/V sync | Kodi's own model, unchanged: audio is the master clock, tied to the audio hardware by the sink's blocking writes and its delay report (the playing block's remaining time plus what is assembled); video is scheduled against that clock and late frames are dropped by Kodi's render manager. Hardware pictures are stamped in display order with a bounded timestamp set (a picture the decoder skips cannot leave video permanently behind). On the paced VRR link the window system reports the presentation latency (one period, plus each frame's wait for its tick) so Kodi schedules against the moment a frame actually reaches the screen. Zero-copy and copying pictures, hardware and software decoding, all take the same path |
 | Audio | `AESinkPS5`: 48 kHz, 2 or 8 channels on the system audio port; the blocking write is the clock. Passthrough = IEC 61937 in 16-bit stereo PCM at 48/192 kHz |
 | Input | `PS5PadInput`: DualSense polled at 125 Hz, mapped to Kodi keyboard events |
 | Network sources | `smb://` on libsmb2, NFS on libnfs, UPnP |
@@ -243,7 +305,10 @@ title/sce_sys/                  Kodi's icon
   `opendir`/`readdir`).
 - **Sandbox.** `lstat` on the title's own mount points fails (SQLite gets a
   patched system call); files the title creates cannot be deleted from outside;
-  USB drives are not visible to a title.
+  USB drives and `/data` are not visible to a jailed title. A resident jailbreak
+  daemon opens the sandbox on request (`{"PID":"<pid>"}` in
+  `/download0/etahen_jailbreak`); system modules must be loaded, and graphics
+  and VideoOut brought up, before that - afterwards those fail.
 - **Media category.** Media apps get half the page tables and a stricter
   sandbox in which the GL driver fails (`EGL_BAD_ALLOC`), so Kodi is a Games title.
 - **Display.** The GL driver's render size is a build profile (2160p60 by
@@ -253,7 +318,7 @@ title/sce_sys/                  Kodi's icon
   system keeps the title on a ~120 Hz VRR link that follows the title's
   presentation, so Kodi's VRR is frame pacing on that link (checked every 2
   seconds). The high-refresh preset's unpeg (`sceVideoOutVrrUnpegFromFixedRate`)
-  returns `0x8029001c` on firmware 10.01, so Kodi does not use that route.
+  is refused (`0x8029001c`), so Kodi does not use that route.
 - **HDR.** Registering scanout buffers in the HDR format needs HDR-capable
   title metadata (`attribute` in `param.json`); with it, the PS5 keeps the TV in
   HDR for the whole session. Re-registering buffers in place is refused
@@ -289,12 +354,29 @@ sed -n "$((N+1)),$((N+40))p" kodi-klog.txt | grep -a -o "^# [0-9a-f]\{16\}" | aw
 ## Roadmap
 
 1. Internet access (curl/TLS): add-on repository, scrapers, online streams.
-2. Python, then binary add-ons through a static registry.
-3. The player debug overlay (L3) during VRR: keep the paced rate.
+   The CA bundle reaches curl; `kodi-debug` runs a network self-test.
+2. Python add-ons: a static CPython 3.14 (`scripts/19-build-python.sh`,
+   `pacbrew/python3`) that Kodi's configure picks up; then binary add-ons
+   through a static registry.
+3. The player debug overlay (L3) during VRR: keep the paced rate
+   (`kodi-debug` logs presented frames, pacing and render time every 5 s).
 4. GL driver: cheaper clears and draws at 4K, runtime-selected render size.
-5. A real DualSense joystick driver, on-screen keyboard.
-6. TrueHD / DTS-HD passthrough (8 channels at 192 kHz), once the PCM path is
-   confirmed bit-exact.
+5. A DualSense joystick driver, the on-screen keyboard.
+6. Passthrough confirmation: whether the PS5 passes IEC 61937 PCM through
+   bit-exactly (2 channels first, then the 8-channel HBR formats).
+
+## Comparison with upstream
+
+`docs/upstream-comparison.md` sets the PS5 implementation of each feature next
+to Kodi's own platforms (GBM, VAAPI, ALSA, the Linux storage provider): which
+differences the console forces, which were accidental, and what was done.
+
+## Validation
+
+`docs/validation.md` is the test matrix, one row per codec and resolution,
+with the log lines each number is read from. Kodi's hardware decoder logs a
+summary line per stream (pictures decoded, achieved rate, decode times, decodes
+over one frame period), so a run through the matrix produces the table.
 
 ## Contributing
 
@@ -316,6 +398,9 @@ and development news.
 - ProsperoLight: reference for direct-memory allocation, the high-refresh
   entitlement, VRR and the HDR scanout format on a PS5 title.
 - The prosper project, for the VP9 codec value.
+- [EVO Player](https://github.com/sainsaji/EVO-PLAYER-PS5): the hardware-verified
+  8-channel order, the sandbox-open protocol and what must precede it, and the
+  in-place HDR switch (and why not to re-register buffers).
 - Ronnie Sahlberg: [libsmb2](https://github.com/sahlberg/libsmb2).
 - The PS5 SDL backend, whose observations of the audio and pad libraries the
   `sce/` headers restate.

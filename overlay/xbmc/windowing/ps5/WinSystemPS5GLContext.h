@@ -9,8 +9,10 @@
 #pragma once
 
 #include <chrono>
+#include <cstdlib>
 
 #include "HdrOutputPS5.h"
+#include "utils/HDRCapabilities.h"
 #include "WinSystemPS5.h"
 #include "rendering/gl/RenderSystemGL.h"
 #include "utils/EGLUtils.h"
@@ -64,10 +66,19 @@ public:
   void PresentRender(bool rendered, bool videoLayer) override;
   bool BeginRender() override;
 
+  // On the paced VRR link a presented frame reaches the screen at the next
+  // pacing tick: Kodi schedules video against that (the render manager adds
+  // GetDisplayLatency() and subtracts GetFrameLatencyAdjustment(), in ms).
+  // Fixed-rate output keeps Kodi's own estimate.
+  float GetDisplayLatency() override;
+  float GetFrameLatencyAdjustment() override;
+
   // HDR output for PQ video (HdrOutputPS5): Kodi's HDR and GUI-compositing hooks
   bool SetHDR(const VideoPicture* videoPicture) override;
   bool IsHDRDisplay() override;
   bool SetGuiCompositing(int colorTransfer) override;
+  bool IsHdrComposite() const override { return m_hdr.IsGuiCompositing(); }
+  CHDRCapabilities GetDisplayHDRCapabilities() const override;
   bool BeginGuiComposite(bool guiWillRender) override;
   void EndGuiComposite() override;
   void CompositeGui() override;
@@ -81,6 +92,15 @@ private:
   std::chrono::steady_clock::time_point m_nextVrrPresent{}; // VRR presentation cadence
   std::chrono::steady_clock::time_point m_lastLinkCheck{};  // VRR link re-check (2 s)
   KODI::PLATFORM::PS5::CHdrOutputPS5 m_hdr;
+
+  // kodi-debug: presented frames, pacing and render time, every 5 seconds
+  const bool m_stats = std::getenv("KODI_PS5_DEBUG") != nullptr;
+  std::chrono::steady_clock::time_point m_frameStart{};
+  std::chrono::steady_clock::time_point m_statWindow{};
+  unsigned m_statFrames = 0;
+  unsigned m_statGuiFrames = 0;
+  double m_statRenderMs = 0.0;
+  double m_statRenderMaxMs = 0.0;
 
   bool CreateContext();
   void QueryOutputGeometry();

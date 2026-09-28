@@ -425,6 +425,22 @@ void arc4random_buf(void* buf, size_t len)
   }
 }
 
+/* getentropy(3): Python's os.urandom and hash seed, OpenSSL's seeding */
+int getentropy(void* buf, size_t len)
+{
+  if (len > 256)
+  {
+    errno = EIO;
+    return -1;
+  }
+  if (kernel_random(buf, len) != 0)
+  {
+    errno = EIO;
+    return -1;
+  }
+  return 0;
+}
+
 uint32_t arc4random(void)
 {
   uint32_t v;

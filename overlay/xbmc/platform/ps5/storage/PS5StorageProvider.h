@@ -10,6 +10,8 @@
 
 #include "storage/IStorageProvider.h"
 
+#include <chrono>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -25,5 +27,12 @@ public:
   void GetRemovableDrives(std::vector<CMediaSource>& removableDrives) override;
   bool Eject(const std::string& mountpath) override { return false; }
   std::vector<std::string> GetDiskUsage() override;
-  bool PumpDriveChangeEvents(IStorageEventsCallback* callback) override { return false; }
+  // USB (and extended-storage) mounts appearing or disappearing while Kodi
+  // runs: checked every 2 seconds, reported as Kodi's storage events
+  bool PumpDriveChangeEvents(IStorageEventsCallback* callback) override;
+
+private:
+  std::set<std::string> m_removable; // paths present at the last check
+  std::chrono::steady_clock::time_point m_lastCheck{};
+  bool m_checked = false;
 };

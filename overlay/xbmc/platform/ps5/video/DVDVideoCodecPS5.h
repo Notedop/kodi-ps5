@@ -86,6 +86,7 @@ private:
 
   std::deque<Decoded> m_decoded;
   std::multiset<double> m_pts; // decoded in display order: the smallest pending pts is next
+  bool m_ptsTrimmed = false;   // logged once: stale timestamps discarded
   double m_lastPts = 0;
   double m_frameDuration = 0;
 
@@ -102,9 +103,21 @@ private:
   // the upper 10 bits (P010) or the lower 10; decided on the first picture.
   bool m_tenBit = false;
   bool m_vp9 = false; // superframes split; hidden frames' outputs not shown
+  // VP9: show flags of access units whose picture has not come out yet (with
+  // frames in flight, a picture belongs to an earlier access unit)
+  std::deque<bool> m_vp9PendingShown;
 
-  // kodi-debug: decode time statistics, logged every 5 seconds
+  // decode time statistics: every 5 seconds with kodi-debug, and one summary
+  // line per stream when the codec closes (always)
   const bool m_timeDecodes = getenv("KODI_PS5_DEBUG") != nullptr;
+  std::string m_streamName;      // for the summary: codec and size
+  float m_streamFps = 0.0f;
+  std::chrono::steady_clock::time_point m_streamStart{};
+  unsigned m_streamDecodes = 0;  // pictures decoded in this stream
+  double m_streamDecodeMs = 0.0; // total decode time
+  double m_streamMaxMs = 0.0;
+  unsigned m_streamOverBudget = 0; // decodes longer than one frame period
+  void LogStreamSummary();
   std::chrono::steady_clock::time_point m_decodeWindow{};
   double m_decodeTotalMs = 0.0;
   double m_decodeMaxMs = 0.0;

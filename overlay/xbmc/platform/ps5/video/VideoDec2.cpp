@@ -199,17 +199,31 @@ void CVideoDec2::FreeDirect(DirectMemory& mem)
   mem = DirectMemory{};
 }
 
+int32_t CVideoDec2::LoadModule()
+{
+  // Once per process. After the sandbox is opened (SandboxPS5), a load call
+  // fails with ESDKVERSION even for a loaded module, and a decoder whose
+  // module never finished loading crashes on first use (EVO Player's
+  // findings) - so the module is loaded at start-up, before that.
+  static int32_t result = 1;
+  if (result == 1)
+    result = sceSysmoduleLoadModule(kSysmoduleVideodec2);
+  return result;
+}
+
 bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& error,
-                     bool interlaced)
+                     bool interlaced, float fps)
 {
   Close();
   const bool uhd = width > 1920 || height > 1088;
   const bool vp9 = codec == VideoDec2Codec::VP9 || codec == VideoDec2Codec::VP9Profile2;
-  m_codecType = codec == VideoDec2Codec::H264 ? kCodecH264 : (vp9 ? kCodecVP9 : kCodecHEVC);
-  m_tenBit = codec == VideoDec2Codec::HEVCMain10 || codec == VideoDec2Codec::VP9Profile2;
+  const bool h264 = codec == VideoDec2Codec::H264 || codec == VideoDec2Codec::H264High10;
+  m_codecType = h264 ? kCodecH264 : (vp9 ? kCodecVP9 : kCodecHEVC);
+  m_tenBit = codec == VideoDec2Codec::HEVCMain10 || codec == VideoDec2Codec::VP9Profile2 ||
+             codec == VideoDec2Codec::H264High10;
   m_formatLogged = false;
 
-  int32_t rc = sceSysmoduleLoadModule(kSysmoduleVideodec2);
+  int32_t rc = LoadModule();
   if (rc < 0)
   {
     error = Hex("loading the video decoder module", rc);
@@ -245,9 +259,9 @@ bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& 
   config.size = sizeof(config);
   config.resourceType = 1;
   config.codecType = m_codecType;
-  if (codec == VideoDec2Codec::H264)
+  if (h264)
   {
-    config.profile = 100; // High (covers Baseline/Main)
+    config.profile = m_tenBit ? 110 : 100; // profile_idc: High 10 / High // High (covers Baseline/Main)
     config.maxLevel = uhd ? 52 : 51;
   }
   else if (vp9)
@@ -264,9 +278,10 @@ bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& 
   // VP9 surfaces are exactly the frame size (the research's proven modes)
   config.maxHeight = vp9 ? (uhd ? 2160 : 1080) : (uhd ? 2176 : 1088);
   config.maxDpbFrames = 16;
-  // kodi-hw-pipeline2: two frames in flight (4K60 VP9 is just over the budget
-  // at depth one); the frame pool copes with the extra output latency
-  config.pipelineDepth = getenv("KODI_PS5_HW_PIPELINE2") ? 2 : 1;
+  // Two frames in flight (4K60 VP9 measured just over the frame budget at
+  // depth one; the codec copes with the output latency).
+  (void)fps;
+  config.pipelineDepth = 2;
   config.computeQueue = reinterpret_cast<uint64_t>(m_computeQueue);
   config.cpuAffinity = 0x3f;
   config.cpuPriority = 700;
@@ -305,12 +320,10 @@ bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& 
   if (vp9)
     Log("[kodi-ps5] videodec2: VP9 profile %u accepted with level %u, %d reference frames\n",
         config.profile, config.maxLevel, config.maxDpbFrames);
-  if (config.pipelineDepth != 1)
-    Log("[kodi-ps5] videodec2: pipeline depth %d (kodi-hw-pipeline2)\n", config.pipelineDepth);
+  Log("[kodi-ps5] videodec2: pipeline depth %d\n", config.pipelineDepth);
   Log("[kodi-ps5] videodec2: %s %dx%d needs cpu=%llx gpu=%llx shared=%llx frame=%llx\n",
-      codec == VideoDec2Codec::H264
-          ? "H.264"
-          : (vp9 ? (m_tenBit ? "VP9 Profile 2" : "VP9") : (m_tenBit ? "HEVC Main10" : "HEVC")),
+      h264 ? (m_tenBit ? "H.264 High 10" : "H.264")
+           : (vp9 ? (m_tenBit ? "VP9 Profile 2" : "VP9") : (m_tenBit ? "HEVC Main10" : "HEVC")),
       config.maxWidth, config.maxHeight,
       static_cast<unsigned long long>(memory.cpuSize),
       static_cast<unsigned long long>(memory.gpuSize),
@@ -536,6 +549,7 @@ bool CVideoDec2::Decode(const uint8_t* au, size_t size, bool& gotPicture,
   output.size = sizeof(output);
 
   const int32_t rc = sceVideodec2Decode(m_decoder, &input, &frame, &output);
+  picture->immediate = output.buffer == frameBuffer;
   if (m_pooled && frame.accepted)
   {
     std::lock_guard<std::mutex> lock(m_frameMutex);

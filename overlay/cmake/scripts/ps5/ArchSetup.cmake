@@ -38,7 +38,9 @@ set(ENABLE_MOLD OFF CACHE BOOL "No mold on PS5" FORCE)
 
 # Console realities for the first bring-up. These are defaults, not walls:
 # pass -DENABLE_<X>=ON on the command line to override.
-set(ENABLE_PYTHON      OFF CACHE BOOL "No CPython port for the payload SDK yet (phase 4)")
+# Python: scripts/20-configure-kodi.sh turns it on when scripts/19 has
+# installed the static CPython 3.14 into the sysroot.
+set(ENABLE_PYTHON      OFF CACHE BOOL "Python add-ons (static CPython from scripts/19)")
 set(ENABLE_OPTICAL     OFF CACHE BOOL "No disc access from homebrew")
 set(ENABLE_DVDCSS      OFF CACHE BOOL "No disc access from homebrew")
 set(ENABLE_AIRTUNES    OFF CACHE BOOL "shairplay not ported")
@@ -74,5 +76,18 @@ endif()
 # libSceVideodec2: stub from scripts/17-build-sce-stubs.sh
 set(SYSTEM_LDFLAGS -lSceAudioOut -lScePad -lSceUserService -lSceNetCtl -lSceSysmodule
                    -lSceVideodec2 -lprocstat -lsmb2)
+
+# A static libpython needs the libraries its built-in modules use (Kodi's
+# FindPython adds them only for its own depends builds); each one that the
+# sysroot has, since Python leaves out a module whose library is missing.
+if(ENABLE_PYTHON)
+  foreach(_pylib expat lzma bz2 sqlite3 ssl crypto z m)
+    find_library(_pylib_${_pylib} ${_pylib})
+    if(_pylib_${_pylib})
+      list(APPEND SYSTEM_LDFLAGS -l${_pylib})
+    endif()
+  endforeach()
+  unset(_pylib)
+endif()
 
 list(APPEND AUDIO_BACKENDS_LIST "ps5")

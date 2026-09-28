@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <chrono>
 #include <vector>
 
 /*!
@@ -58,6 +59,8 @@ private:
   unsigned int m_channels{2};
   unsigned int m_sampleRate{48000}; // 192000 for E-AC3 passthrough
   unsigned int m_frameSize{0};
+  bool m_hbrSwap{false}; // 8-channel passthrough: words 2 and 3 swapped (FC/LFE slots)
   std::vector<uint8_t> m_block; // one grain being assembled
   unsigned int m_blockFrames{0}; // frames currently in m_block
+  std::chrono::steady_clock::time_point m_blockStarted{}; // when the playing block began
 };

@@ -11,3 +11,4 @@
 0011-renderer-no-pbo-rectangle-always-ps5.patch
 0012-refresh-vrr-playback-only-ps5.patch
 0013-default-framebuffer-hdr-ps5.patch
+0014-hlg-to-pq-shader-ps5.patch

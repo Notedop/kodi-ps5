@@ -67,6 +67,8 @@ echo "==> ps5-opengl -> $PS5_OPENGL_PREFIX"
 # need glslangValidator + SPIR-V Tools; Mesa 26 needs a newer Meson than the
 # 1.3 Ubuntu 24.04 ships (ps5-opengl records Meson 1.10), so take it from pip.
 sudo apt-get install -y glslang-tools spirv-tools python3-packaging python3-pip python3-venv
+# Kodi's Python bindings generator (SWIG + Groovy, which needs a Java runtime)
+sudo apt-get install -y swig default-jre-headless
 if ! dpkg --compare-versions "$(meson --version 2>/dev/null || echo 0)" ge 1.10; then
   pip3 install --user --break-system-packages 'meson>=1.10'
 fi
@@ -101,7 +103,10 @@ if [ ! -d "$WORK/ps5-native-app-boilerplate/.deps/native" ]; then
 fi
 
 if [ ! -d "$WORK/ps5-opengl" ]; then
-  git clone --depth 1 https://github.com/blackbearreloaded/ps5-opengl.git "$WORK/ps5-opengl"
+  # pinned: patches/ps5-opengl/kodi-additions.py is written against this revision
+  PS5_OPENGL_COMMIT="$(tr -d '[:space:]' < "$(dirname "${BASH_SOURCE[0]}")/../patches/ps5-opengl/PS5-OPENGL-COMMIT")"
+  git clone --no-checkout https://github.com/blackbearreloaded/ps5-opengl.git "$WORK/ps5-opengl"
+  git -C "$WORK/ps5-opengl" checkout -q "$PS5_OPENGL_COMMIT"
 fi
 if [ ! -f "$PS5_OPENGL_PREFIX/lib/cmake/PS5OpenGL/PS5OpenGLConfig.cmake" ]; then
   # "Library-only workflow": PS5_PAYLOAD_SDK is exported above, so the compiler

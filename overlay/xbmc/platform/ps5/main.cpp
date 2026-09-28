@@ -393,6 +393,14 @@ int main(int argc, char* argv[])
     }
     Klogf("[kodi-ps5] HOME=%s\n", chosen);
     setenv("HOME", chosen, 1);
+    // Python add-ons: the standard library ships in the title (Install.cmake)
+    struct stat pythonLib;
+    if (stat("/app0/share/kodi/python/lib/python3.14", &pythonLib) == 0)
+    {
+      setenv("PYTHONHOME", "/app0/share/kodi/python", 1);
+      setenv("PYTHONNOUSERSITE", "1", 1);
+      Klog("[kodi-ps5] PYTHONHOME=/app0/share/kodi/python\n");
+    }
   }
   const std::string kodiData = std::string(std::getenv("HOME")) + "/.kodi";
   if (const int failed = OpenUpTree(kodiData)) // files left by earlier runs
@@ -470,13 +478,6 @@ int main(int argc, char* argv[])
     const char* env;
   } kSwitches[] = {
       {"/app0/kodi-debug", "KODI_PS5_DEBUG"},
-      {"/app0/kodi-swdecode", "KODI_PS5_SWDECODE"},
-      {"/app0/kodi-no-zerocopy", "KODI_PS5_NO_ZEROCOPY"},
-      {"/app0/kodi-stereo-only", "KODI_PS5_STEREO_ONLY"},
-      {"/app0/kodi-no-hdr", "KODI_PS5_NO_HDR"},
-      {"/app0/kodi-multichannel-alt", "KODI_PS5_MULTICHANNEL_ALT"},
-      {"/app0/kodi-hw-pipeline2", "KODI_PS5_HW_PIPELINE2"},
-      {"/app0/kodi-probe-hdr", "KODI_PS5_PROBE_HDR"},
   };
   for (const auto& sw : kSwitches)
   {

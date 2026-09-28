@@ -15,6 +15,14 @@ configure_file(${CMAKE_SOURCE_DIR}/cmake/KodiConfig.cmake.in
 install(TARGETS ${APP_NAME_LC} DESTINATION ${libdir}/${APP_NAME_LC}
         RENAME ${APP_BINARY} COMPONENT kodi-bin)
 
+# Python's standard library, found by PYTHONHOME (set in main.cpp)
+if(ENABLE_PYTHON)
+  install(DIRECTORY ${CMAKE_SYSROOT}/user/homebrew/lib/python3.14
+          DESTINATION ${datarootdir}/${APP_NAME_LC}/python/lib
+          COMPONENT kodi
+          PATTERN "__pycache__" EXCLUDE)
+endif()
+
 foreach(_dir addons media system userdata)
   install(DIRECTORY ${CMAKE_BINARY_DIR}/${_dir}
           DESTINATION ${datarootdir}/${APP_NAME_LC}

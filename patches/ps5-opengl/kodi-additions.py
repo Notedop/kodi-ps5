@@ -28,13 +28,14 @@ ADDITIONS = [
 # 32 bits per pixel, so the buffers stay the same memory.
 HDR = [
     (RUNTIME, None, """
-/* KODI-PS5: switch the scanout buffers' pixel format (HDR output). First the
- * in-place way (sceVideoOutSubmitChangeBufferAttribute2 on buffer set 0, which
- * takes effect at the next flip); if that is refused, pending flips are
- * drained and the same two buffers are unregistered and registered again with
- * the new format, and if that is refused too, the previous format is
- * registered again. results[0..3] = change, unregister, register, restore
- * (0x7fffffff = not attempted). Returns 0 if the new format is in effect. */
+/* KODI-PS5: switch the scanout buffers' pixel format (HDR output) in place:
+ * sceVideoOutSubmitChangeBufferAttribute2 on buffer set 0, applied by
+ * VideoOut at the next flip - the call games use to toggle HDR. Deliberately
+ * no unregister/register fallback: the set on screen cannot be unregistered
+ * (RESOURCE_BUSY), the re-register then fails SLOT_OCCUPIED, and that sequence
+ * can leave the next present hanging (EVO Player, hardware 2026-09-28).
+ * results[0] = change result; results[1..3] unused (0x7fffffff).
+ * Returns 0 if the new format is in effect. */
 int ps5_opengl_set_scanout_format(uint64_t pixel_format, int32_t results[4]);
 #if defined(AGC_RUNTIME_PACKAGES) /* the runtime's video state lives in this build only */
 int sceVideoOutSubmitChangeBufferAttribute2(int32_t handle, int32_t set_index,
@@ -46,9 +47,7 @@ ps5_opengl_set_scanout_format(uint64_t pixel_format, int32_t results[4])
     static uint64_t current = VIDEO_OUT_PIXEL_FORMAT;
     for (int i = 0; i < 4; ++i)
         results[i] = 0x7fffffff;
-    if (!runtime_video_registered || runtime_video_handle < 0 || !runtime_video_framebuffer ||
-        !runtime_video_api.unregister_buffers || !runtime_video_api.register_buffers2 ||
-        !runtime_video_api.set_attribute2)
+    if (!runtime_video_registered || runtime_video_handle < 0 || !runtime_video_api.set_attribute2)
         return -1;
     if (pixel_format == current)
         return 0;
@@ -57,34 +56,9 @@ ps5_opengl_set_scanout_format(uint64_t pixel_format, int32_t results[4])
                                      0, 0, 0);
     results[0] = sceVideoOutSubmitChangeBufferAttribute2(runtime_video_handle, 0, &attribute, 0,
                                                          NULL);
-    if (results[0] == 0) {
+    if (results[0] == 0)
         current = pixel_format;
-        return 0;
-    }
-    /* drain pending flips the way ProsperoLight does before unregistering */
-    for (unsigned waits = 0; waits < 120 && runtime_video_api.is_flip_pending &&
-                             runtime_video_api.is_flip_pending(runtime_video_handle) > 0; ++waits)
-        runtime_video_api.wait_vblank(runtime_video_handle);
-    uint8_t *framebuffer = runtime_video_framebuffer;
-    video_buffer_t buffers[2] = {
-        {framebuffer, NULL, NULL, NULL},
-        {framebuffer + (runtime_video_framebuffer_size >= FRAMEBUFFER_POOL_BYTES
-                            ? FRAMEBUFFER_BYTES : 0),
-         NULL, NULL, NULL}
-    };
-    results[1] = runtime_video_api.unregister_buffers(runtime_video_handle, 0);
-    results[2] = runtime_video_api.register_buffers2(runtime_video_handle, 0, 0, buffers, 2,
-                                                     &attribute, 0, NULL);
-    if (results[2] == 0) {
-        current = pixel_format;
-        return 0;
-    }
-    video_attribute_t previous = {{0}};
-    runtime_video_api.set_attribute2(&previous, current, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                     0, 0, 0);
-    results[3] = runtime_video_api.register_buffers2(runtime_video_handle, 0, 0, buffers, 2,
-                                                     &previous, 0, NULL);
-    return results[2];
+    return results[0];
 }
 #else
 int
@@ -99,6 +73,11 @@ ps5_opengl_set_scanout_format(uint64_t pixel_format, int32_t results[4])
 """, "append"),
 ]
 
+# Written against ps5-opengl 122aa899f9255e37d776b2a5317c86e5e9679907 (2026-09-25,
+# "Document native preparation workers and rendering qualification limits"),
+# see PS5-OPENGL-COMMIT; scripts/00-setup-wsl.sh checks that revision out. The
+# additions are inserted at anchor lines of three files; an anchor that a newer
+# revision has changed is reported as "skipped, anchor differs" with its label.
 # Zero-copy video (optional: skipped, with a note, if a revision differs).
 # A sampled 2D texture over memory the driver does not own (the hardware video
 # decoder's frames), handed to GL as an EGL image; see the Kodi renderer
@@ -319,7 +298,78 @@ ps5_opengl_set_scanout_format(uint64_t pixel_format)
 }
 #endif
 """
-HDR_BROKEN = [(RUNTIME, HDR_PREVIOUS),
+HDR_WITH_FALLBACK = """
+/* KODI-PS5: switch the scanout buffers' pixel format (HDR output). First the
+ * in-place way (sceVideoOutSubmitChangeBufferAttribute2 on buffer set 0, which
+ * takes effect at the next flip); if that is refused, pending flips are
+ * drained and the same two buffers are unregistered and registered again with
+ * the new format, and if that is refused too, the previous format is
+ * registered again. results[0..3] = change, unregister, register, restore
+ * (0x7fffffff = not attempted). Returns 0 if the new format is in effect. */
+int ps5_opengl_set_scanout_format(uint64_t pixel_format, int32_t results[4]);
+#if defined(AGC_RUNTIME_PACKAGES) /* the runtime's video state lives in this build only */
+int sceVideoOutSubmitChangeBufferAttribute2(int32_t handle, int32_t set_index,
+                                            const void *attribute, int32_t category,
+                                            void *option);
+int
+ps5_opengl_set_scanout_format(uint64_t pixel_format, int32_t results[4])
+{
+    static uint64_t current = VIDEO_OUT_PIXEL_FORMAT;
+    for (int i = 0; i < 4; ++i)
+        results[i] = 0x7fffffff;
+    if (!runtime_video_registered || runtime_video_handle < 0 || !runtime_video_framebuffer ||
+        !runtime_video_api.unregister_buffers || !runtime_video_api.register_buffers2 ||
+        !runtime_video_api.set_attribute2)
+        return -1;
+    if (pixel_format == current)
+        return 0;
+    video_attribute_t attribute = {{0}};
+    runtime_video_api.set_attribute2(&attribute, pixel_format, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+                                     0, 0, 0);
+    results[0] = sceVideoOutSubmitChangeBufferAttribute2(runtime_video_handle, 0, &attribute, 0,
+                                                         NULL);
+    if (results[0] == 0) {
+        current = pixel_format;
+        return 0;
+    }
+    /* drain pending flips the way ProsperoLight does before unregistering */
+    for (unsigned waits = 0; waits < 120 && runtime_video_api.is_flip_pending &&
+                             runtime_video_api.is_flip_pending(runtime_video_handle) > 0; ++waits)
+        runtime_video_api.wait_vblank(runtime_video_handle);
+    uint8_t *framebuffer = runtime_video_framebuffer;
+    video_buffer_t buffers[2] = {
+        {framebuffer, NULL, NULL, NULL},
+        {framebuffer + (runtime_video_framebuffer_size >= FRAMEBUFFER_POOL_BYTES
+                            ? FRAMEBUFFER_BYTES : 0),
+         NULL, NULL, NULL}
+    };
+    results[1] = runtime_video_api.unregister_buffers(runtime_video_handle, 0);
+    results[2] = runtime_video_api.register_buffers2(runtime_video_handle, 0, 0, buffers, 2,
+                                                     &attribute, 0, NULL);
+    if (results[2] == 0) {
+        current = pixel_format;
+        return 0;
+    }
+    video_attribute_t previous = {{0}};
+    runtime_video_api.set_attribute2(&previous, current, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+                                     0, 0, 0);
+    results[3] = runtime_video_api.register_buffers2(runtime_video_handle, 0, 0, buffers, 2,
+                                                     &previous, 0, NULL);
+    return results[2];
+}
+#else
+int
+ps5_opengl_set_scanout_format(uint64_t pixel_format, int32_t results[4])
+{
+    (void)pixel_format;
+    for (int i = 0; i < 4; ++i)
+        results[i] = 0x7fffffff;
+    return -1;
+}
+#endif
+"""
+HDR_BROKEN = [(RUNTIME, HDR_WITH_FALLBACK),
+              (RUNTIME, HDR_PREVIOUS),
               (RUNTIME, HDR_PREVIOUS.replace('restore=%08x' + chr(92) + 'n",', 'restore=%08x' + chr(10) + '",'))]
 
 REMOVED = [

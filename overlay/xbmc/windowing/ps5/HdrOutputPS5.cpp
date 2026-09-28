@@ -69,6 +69,11 @@ unsigned int KODI::PLATFORM::PS5::DefaultFramebuffer()
   return g_hdrOutput ? g_hdrOutput->DefaultFramebuffer() : 0;
 }
 
+bool KODI::PLATFORM::PS5::HdrOutputConvertsHlg()
+{
+  return g_hdrOutput && g_hdrOutput->ConvertsHlg();
+}
+
 CHdrOutputPS5::~CHdrOutputPS5()
 {
   SwitchScanout(false);
@@ -100,17 +105,20 @@ void CHdrOutputPS5::SwitchScanout(bool hdr)
 bool CHdrOutputPS5::SetHDR(const VideoPicture* picture)
 {
   g_hdrOutput = this;
-  // PQ only: the platform's HDR format is BT.2020 PQ, and Kodi passes the
-  // video's transfer through unchanged (HLG is tone mapped like SDR output)
-  const bool wantHdr = picture && picture->color_transfer == AVCOL_TRC_SMPTE2084 &&
-                       !std::getenv("KODI_PS5_NO_HDR");
+  // The platform's HDR format is BT.2020 PQ: PQ video passes through
+  // unchanged, HLG is converted to PQ in Kodi's YUV shader (patch 0014)
+  const bool pq = picture && picture->color_transfer == AVCOL_TRC_SMPTE2084;
+  const bool hlg = picture && picture->color_transfer == AVCOL_TRC_ARIB_STD_B67;
+  const bool wantHdr = (pq || hlg) && IsDisplayHdr();
+  m_hlg = wantHdr && hlg;
   if (wantHdr && !CreatePackProgram())
     return false;
   SwitchScanout(wantHdr);
   m_active = wantHdr && m_hdrScanout;
   if (!m_active)
     DestroyTarget();
-  CLog::Log(LOGINFO, "CHdrOutputPS5: HDR output {}", m_active ? "active" : "off");
+  CLog::Log(LOGINFO, "CHdrOutputPS5: HDR output {}{}", m_active ? "active" : "off",
+            m_active && m_hlg ? " (HLG converted to PQ)" : "");
   return m_active;
 }
 

@@ -27,6 +27,7 @@ extern "C"
 #include <libavutil/opt.h>
 }
 #include "cores/VideoPlayer/Process/ProcessInfo.h"
+#include "utils/StringUtils.h"
 #include "utils/log.h"
 
 #include <algorithm>
@@ -72,6 +73,7 @@ CDVDVideoCodecPS5::CDVDVideoCodecPS5(CProcessInfo& processInfo) : CDVDVideoCodec
 
 CDVDVideoCodecPS5::~CDVDVideoCodecPS5()
 {
+  LogStreamSummary();
   ClearQueue();
   CloseDeinterlacer();
   av_bsf_free(&m_bsf);
@@ -93,15 +95,12 @@ void CDVDVideoCodecPS5::Register()
 
 bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
 {
-  if (getenv("KODI_PS5_SWDECODE") != nullptr)
-  {
-    CLog::Log(LOGINFO, "CDVDVideoCodecPS5: kodi-swdecode present, using software decoding");
-    return false;
-  }
-
   VideoDec2Codec codec;
   if (hints.codec == AV_CODEC_ID_H264 && IsH264Supported(hints.profile))
     codec = VideoDec2Codec::H264;
+  else if (hints.codec == AV_CODEC_ID_H264 && hints.profile == AV_PROFILE_H264_HIGH_10 &&
+           hints.bitsperpixel <= 10)
+    codec = VideoDec2Codec::H264High10; // the decoder's query decides; refused -> FFmpeg
   else if (hints.codec == AV_CODEC_ID_HEVC &&
            (hints.profile == AV_PROFILE_HEVC_MAIN || hints.profile == AV_PROFILE_UNKNOWN) &&
            hints.bitsperpixel <= 8)
@@ -132,9 +131,8 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
   // interlaced: bwdif over the decoded frames, which needs them in ordinary
   // memory - so no zero-copy for these
   m_deinterlace = interlaced;
-  // zero-copy (the default): pictures are the decoder's own frames;
-  // kodi-no-zerocopy selects the copying path
-  m_zeroCopy = !interlaced && IsZeroCopyAvailable() && !getenv("KODI_PS5_NO_ZEROCOPY");
+  // zero-copy: pictures are the decoder's own frames
+  m_zeroCopy = !interlaced && IsZeroCopyAvailable();
   if (!interlaced && !IsZeroCopyAvailable())
     CLog::Log(LOGWARNING, "CDVDVideoCodecPS5: the GL driver has no zero-copy additions (rebuild "
               "it with scripts/18): copying frames");
@@ -143,7 +141,22 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
     m_zeroCopyPool = std::make_shared<CVideoBufferPoolPS5>();
 
   std::string error;
-  if (!m_decoder->Open(codec, hints.width, hints.height, error, interlaced))
+  const float fps = hints.fpsscale > 0 ? static_cast<float>(hints.fpsrate) / hints.fpsscale : 0.0f;
+  m_streamFps = fps;
+  m_streamName = StringUtils::Format(
+      "{} {}x{}",
+      codec == VideoDec2Codec::H264
+          ? "H.264"
+          : (codec == VideoDec2Codec::H264High10
+                 ? "H.264 High 10"
+                 : (m_vp9 ? (m_tenBit ? "VP9 Profile 2" : "VP9")
+                          : (m_tenBit ? "HEVC Main10" : "HEVC"))),
+      hints.width, hints.height);
+  m_streamStart = std::chrono::steady_clock::now();
+  m_streamDecodes = 0;
+  m_streamDecodeMs = m_streamMaxMs = 0.0;
+  m_streamOverBudget = 0;
+  if (!m_decoder->Open(codec, hints.width, hints.height, error, interlaced, fps))
   {
     CLog::Log(LOGWARNING, "CDVDVideoCodecPS5: hardware decoder unavailable ({}), using FFmpeg",
               error);
@@ -179,7 +192,8 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
   m_stereoMode = hints.stereo_mode;
 
   m_vp9 = codec == VideoDec2Codec::VP9 || codec == VideoDec2Codec::VP9Profile2;
-  m_tenBit = codec == VideoDec2Codec::HEVCMain10 || codec == VideoDec2Codec::VP9Profile2;
+  m_tenBit = codec == VideoDec2Codec::HEVCMain10 || codec == VideoDec2Codec::VP9Profile2 ||
+             codec == VideoDec2Codec::H264High10;
   m_alignmentKnown = !m_tenBit;
   m_alignmentSamples = 0;
   // 10-bit: lower-aligned until a picture shows otherwise (DetectAlignment)
@@ -207,8 +221,10 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
   CLog::Log(LOGINFO, "CDVDVideoCodecPS5: hardware {} decoding {}x{}",
             codec == VideoDec2Codec::H264
                 ? "H.264"
-                : (m_vp9 ? (m_tenBit ? "VP9 Profile 2" : "VP9")
-                         : (m_tenBit ? "HEVC Main10" : "HEVC")),
+                : (codec == VideoDec2Codec::H264High10
+                       ? "H.264 High 10"
+                       : (m_vp9 ? (m_tenBit ? "VP9 Profile 2" : "VP9")
+                                : (m_tenBit ? "HEVC Main10" : "HEVC"))),
             hints.width, hints.height);
   return true;
 }
@@ -285,7 +301,29 @@ bool CDVDVideoCodecPS5::AddData(const DemuxPacket& packet)
 
   const double pts = packet.pts != DVD_NOPTS_VALUE ? packet.pts : packet.dts;
   if (pts != DVD_NOPTS_VALUE)
+  {
     m_pts.insert(pts);
+    // The decoder returns pictures in display order, and each gets the
+    // smallest pending timestamp. If it ever returns fewer pictures than it
+    // was given (a skipped or corrupt picture), the pending set would grow and
+    // every later picture would be stamped too early - a permanent, growing
+    // lag behind the audio. Bound it: the reorder depth plus frames in flight
+    // never exceeds this, so anything beyond is a timestamp without a picture.
+    constexpr size_t kMaxPending = 24;
+    if (m_pts.size() > kMaxPending)
+    {
+      const size_t excess = m_pts.size() - kMaxPending;
+      for (size_t i = 0; i < excess; ++i)
+        m_pts.erase(m_pts.begin());
+      if (!m_ptsTrimmed)
+      {
+        m_ptsTrimmed = true;
+        CLog::Log(LOGWARNING,
+                  "CDVDVideoCodecPS5: the decoder returned fewer pictures than access units; "
+                  "{} stale timestamp(s) discarded to keep A/V sync", excess);
+      }
+    }
+  }
 
   if (!m_bsf)
     return DecodeOne(packet.pData, static_cast<size_t>(packet.iSize)) || !m_fatal;
@@ -344,7 +382,7 @@ bool Vp9FrameIsShown(const uint8_t* data, size_t size)
 
 bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
 {
-  const bool shown = !m_vp9 || Vp9FrameIsShown(data, size);
+  const bool thisShown = !m_vp9 || Vp9FrameIsShown(data, size);
   bool gotPicture = false;
   const auto decodeStart = std::chrono::steady_clock::now();
   VideoDec2Picture picture;
@@ -362,16 +400,21 @@ bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
     return false;
   }
   m_errorsInRow = 0;
-  if (m_timeDecodes && !m_decoder->Stalled())
+  if (!m_decoder->Stalled())
   {
     const auto now = std::chrono::steady_clock::now();
     const double ms = std::chrono::duration<double, std::milli>(now - decodeStart).count();
+    ++m_streamDecodes;
+    m_streamDecodeMs += ms;
+    m_streamMaxMs = std::max(m_streamMaxMs, ms);
+    if (m_streamFps > 0.0f && ms > 1000.0 / static_cast<double>(m_streamFps))
+      ++m_streamOverBudget;
     m_decodeTotalMs += ms;
     m_decodeMaxMs = std::max(m_decodeMaxMs, ms);
     ++m_decodeCount;
     if (m_decodeWindow.time_since_epoch().count() == 0)
       m_decodeWindow = now;
-    else if (now - m_decodeWindow >= std::chrono::seconds(5))
+    else if (m_timeDecodes && now - m_decodeWindow >= std::chrono::seconds(5))
     {
       CLog::Log(LOGINFO, "CDVDVideoCodecPS5 (kodi-debug): {} decodes in {:.1f} s, {:.1f} ms average, "
                 "{:.1f} ms longest",
@@ -389,6 +432,24 @@ bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
     m_pendingAus.emplace_front(data, data + size);
     return true;
   }
+  // VP9: whose picture is this? The just-offered frame's (immediate), or the
+  // oldest access unit still waiting (frames in flight). The current access
+  // unit's flag is queued when its picture has not come out with it.
+  bool shown = true;
+  if (m_vp9)
+  {
+    if (gotPicture && picture.immediate)
+      shown = thisShown;
+    else
+    {
+      m_vp9PendingShown.push_back(thisShown);
+      if (gotPicture)
+      {
+        shown = m_vp9PendingShown.front();
+        m_vp9PendingShown.pop_front();
+      }
+    }
+  }
   if (gotPicture && !shown)
   {
     // VP9 hidden frame: decoded as a reference, never presented
@@ -398,6 +459,21 @@ bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
   if (gotPicture)
     Keep(picture);
   return true;
+}
+
+void CDVDVideoCodecPS5::LogStreamSummary()
+{
+  if (m_streamDecodes == 0)
+    return;
+  const double seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - m_streamStart).count();
+  CLog::Log(LOGINFO,
+            "CDVDVideoCodecPS5: {} at {:.3f} fps, {}: {} pictures in {:.1f} s ({:.1f}/s), decode "
+            "{:.1f} ms average / {:.1f} ms longest, {} over one frame period{}",
+            m_streamName, m_streamFps, m_zeroCopy ? "zero-copy" : (m_deinterlace ? "bwdif" : "copy"),
+            m_streamDecodes, seconds, seconds > 0.0 ? m_streamDecodes / seconds : 0.0,
+            m_streamDecodeMs / m_streamDecodes, m_streamMaxMs, m_streamOverBudget,
+            m_streamOverBudget == 0 ? "" : " (would drop)");
 }
 
 bool CDVDVideoCodecPS5::RetryPending()
@@ -669,6 +745,7 @@ void CDVDVideoCodecPS5::Reset()
   m_pts.clear();
   m_decoder->Reset();
   m_pendingAus.clear();
+  m_vp9PendingShown.clear();
   CloseDeinterlacer(); // set up again with the next picture
   m_deintPts.clear();
   m_deintOutputs = 0;
