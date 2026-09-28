@@ -68,6 +68,14 @@ private:
   };
 
   bool SetupBitstreamFilter(const CDVDStreamInfo& hints);
+  // The stream's parameter sets (SPS/PPS, and VPS for HEVC) as Annex-B NAL
+  // units, prepended to the first access unit after an open or a reset. The
+  // Annex-B filter injects them only in front of an IDR; a seek that lands on
+  // a non-IDR I-frame would otherwise leave the decoder without them (black
+  // pictures that P-frames slowly paint in).
+  void BuildParameterSets(const CDVDStreamInfo& hints);
+  std::vector<uint8_t> m_parameterSets;
+  bool m_prependParameterSets = false;
   CDVDStreamInfo m_hints; // for rebuilding the bitstream filter on a seek
   bool DecodeOne(const uint8_t* data, size_t size);
   bool Keep(const VideoDec2Picture& picture);

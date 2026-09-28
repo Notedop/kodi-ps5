@@ -166,6 +166,8 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
     return false;
   }
   m_hints = hints;
+  BuildParameterSets(hints);
+  m_prependParameterSets = !m_parameterSets.empty();
   if (!SetupBitstreamFilter(hints))
   {
     m_decoder->Close();
@@ -236,6 +238,82 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
                                 : (m_tenBit ? "HEVC Main10" : "HEVC"))),
             hints.width, hints.height);
   return true;
+}
+
+void CDVDVideoCodecPS5::BuildParameterSets(const CDVDStreamInfo& hints)
+{
+  m_parameterSets.clear();
+  const uint8_t* extra = hints.extradata.GetData();
+  const size_t size = hints.extradata.GetSize();
+  if (!extra || size < 4)
+    return;
+  static const uint8_t startCode[4] = {0, 0, 0, 1};
+  auto addNal = [&](const uint8_t* nal, size_t length)
+  {
+    m_parameterSets.insert(m_parameterSets.end(), startCode, startCode + 4);
+    m_parameterSets.insert(m_parameterSets.end(), nal, nal + length);
+  };
+  if (extra[0] != 1)
+  {
+    // already Annex-B (start codes): the parameter sets as they are
+    if (extra[0] == 0 && extra[1] == 0)
+      m_parameterSets.assign(extra, extra + size);
+    return;
+  }
+  size_t pos = 0;
+  if (hints.codec == AV_CODEC_ID_H264)
+  {
+    // avcC: 5 header bytes, SPS count (low 5 bits), SPS entries, PPS count,
+    // PPS entries; each entry a 16-bit length and the NAL unit
+    if (size < 7)
+      return;
+    const unsigned numSps = extra[5] & 0x1f;
+    pos = 6;
+    for (unsigned i = 0; i < numSps && pos + 2 <= size; ++i)
+    {
+      const size_t length = (extra[pos] << 8) | extra[pos + 1];
+      pos += 2;
+      if (pos + length > size)
+        return;
+      addNal(extra + pos, length);
+      pos += length;
+    }
+    if (pos >= size)
+      return;
+    const unsigned numPps = extra[pos++];
+    for (unsigned i = 0; i < numPps && pos + 2 <= size; ++i)
+    {
+      const size_t length = (extra[pos] << 8) | extra[pos + 1];
+      pos += 2;
+      if (pos + length > size)
+        return;
+      addNal(extra + pos, length);
+      pos += length;
+    }
+  }
+  else if (hints.codec == AV_CODEC_ID_HEVC)
+  {
+    // hvcC: 22 header bytes, then arrays of NAL units (type byte, 16-bit
+    // count, entries with 16-bit lengths): VPS, SPS, PPS in order
+    if (size < 23)
+      return;
+    const unsigned numArrays = extra[22];
+    pos = 23;
+    for (unsigned a = 0; a < numArrays && pos + 3 <= size; ++a)
+    {
+      const unsigned count = (extra[pos + 1] << 8) | extra[pos + 2];
+      pos += 3;
+      for (unsigned i = 0; i < count && pos + 2 <= size; ++i)
+      {
+        const size_t length = (extra[pos] << 8) | extra[pos + 1];
+        pos += 2;
+        if (pos + length > size)
+          return;
+        addNal(extra + pos, length);
+        pos += length;
+      }
+    }
+  }
 }
 
 bool CDVDVideoCodecPS5::SetupBitstreamFilter(const CDVDStreamInfo& hints)
@@ -417,6 +495,19 @@ bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
     m_skipRasl = false;
   }
   const bool thisShown = !m_vp9 || Vp9FrameIsShown(data, size);
+  std::vector<uint8_t> withParameterSets;
+  if (m_prependParameterSets)
+  {
+    m_prependParameterSets = false;
+    withParameterSets.reserve(m_parameterSets.size() + size);
+    withParameterSets.insert(withParameterSets.end(), m_parameterSets.begin(), m_parameterSets.end());
+    withParameterSets.insert(withParameterSets.end(), data, data + size);
+    data = withParameterSets.data();
+    size = withParameterSets.size();
+    if (m_timeDecodes)
+      CLog::Log(LOGINFO, "CDVDVideoCodecPS5: parameter sets ({} bytes) prepended to the first access unit",
+                m_parameterSets.size());
+  }
   bool gotPicture = false;
   const auto decodeStart = std::chrono::steady_clock::now();
   VideoDec2Picture picture;
@@ -832,6 +923,7 @@ void CDVDVideoCodecPS5::Reset()
   ReleaseHeld();
   m_pts.clear();
   m_skipRasl = m_hevc;
+  m_prependParameterSets = !m_parameterSets.empty();
   m_trace = 30;
   m_decoder->Reset();
   m_pendingAus.clear();
