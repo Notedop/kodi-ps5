@@ -8,6 +8,8 @@
 
 #include "PS5PadInput.h"
 
+#include "PS5ImeDialog.h"
+
 #include "ServiceBroker.h"
 #include "application/AppInboundProtocol.h"
 #include "input/keyboard/XBMC_keyboard.h"
@@ -219,6 +221,24 @@ void CPadInput::PollPad(Pad& pad)
 
   const uint32_t changed = buttons ^ pad.lastButtons;
   const auto now = std::chrono::steady_clock::now();
+
+  const bool nativeKeyboard = CPS5ImeDialog::IsActive();
+  if (nativeKeyboard || pad.waitForRelease)
+  {
+    for (uint32_t bit = 1; bit; bit <<= 1)
+      if (pad.lastButtons & bit)
+        EmitKey(bit, false);
+    pad.lastButtons = 0;
+    pad.heldRepeat = 0;
+    // Wait for neutral input so the IME's closing press cannot activate Kodi.
+    pad.waitForRelease = nativeKeyboard || buttons != 0;
+    if (nativeKeyboard && buttons && now >= pad.nextRepeat)
+    {
+      CPS5ImeDialog::NotifyInputActivity();
+      pad.nextRepeat = now + REPEAT_RATE;
+    }
+    return;
+  }
 
   for (uint32_t bit = 1; bit; bit <<= 1)
   {

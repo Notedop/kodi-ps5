@@ -74,7 +74,7 @@ endif()
 # -lprocstat: stub from shims/libprocstat (scripts/12); exiv2 references
 # libprocstat on any __FreeBSD__ target for its library-info dump.
 # libSceVideodec2: stub from scripts/17-build-sce-stubs.sh
-set(SYSTEM_LDFLAGS -lSceAudioOut -lScePad -lSceUserService -lSceNetCtl -lSceSysmodule
+set(SYSTEM_LDFLAGS -lSceAudioOut -lScePad -lSceUserService -lSceImeDialog -lSceRegMgr -lSceNetCtl -lSceSysmodule
                    -lSceVideodec2 -lprocstat -lsmb2)
 
 # A static libpython needs the libraries its built-in modules use (Kodi's

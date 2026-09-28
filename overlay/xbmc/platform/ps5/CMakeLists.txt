@@ -14,6 +14,7 @@ set(HEADERS CPUInfoPS5.h
             SandboxPS5.h
             VideoOutInfo.h
             sce/SceAudioOut.h
+            sce/SceImeDialog.h
             sce/ScePad.h
             sce/SceUserService.h)
 
