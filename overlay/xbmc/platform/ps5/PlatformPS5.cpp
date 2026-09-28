@@ -9,6 +9,7 @@
 #include "PlatformPS5.h"
 
 #include "filesystem/CurlFile.h"
+#include "platform/ps5/input/PS5ImeDialog.h"
 #include "platform/ps5/network/NetworkSelfTestPS5.h"
 #include "platform/ps5/video/VideoDec2.h"
 #include "utils/log.h"
@@ -41,6 +42,7 @@ bool CPlatformPS5::InitStageOne()
   if (videodec < 0)
     CLog::Log(LOGWARNING, "CPlatformPS5: video decoder module not loaded ({:#x})",
               static_cast<uint32_t>(videodec));
+  KODI::PLATFORM::PS5::CPS5ImeDialog::Preload(); // the native keyboard (logs itself)
 
   return true;
 }

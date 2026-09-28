@@ -149,7 +149,7 @@ CPS5ImeDialog::Outcome CPS5ImeDialog::Open(const std::string& title,
     m_param.posx = 960.0f;
     m_param.posy = 540.0f;
     // when hidden then use special password mode with different options disabled like learning. Else it will use normal mode which includes learning mode.
-    m_param.option = hidden ? SCE_IME_OPTION_NO_AUTO_CAPITALIZATION | SCE_IME_OPTION_PASSWORD | IME_OPTION_NO_LEARNING | SCE_IME_OPTION_DISABLE_COPY_PASTE : SCE_IME_OPTION_NONE;
+    m_param.option = hidden ? SCE_IME_OPTION_NO_AUTO_CAPITALIZATION | SCE_IME_OPTION_PASSWORD | SCE_IME_OPTION_NO_LEARNING | SCE_IME_OPTION_DISABLE_COPY_PASTE : SCE_IME_OPTION_NONE;
 
     result = sceImeDialogInit(&m_param, nullptr);
 
@@ -255,6 +255,11 @@ void CPS5ImeDialog::Close()
         m_owned = false;
         g_imeOwned = false;
     }
+}
+
+bool CPS5ImeDialog::Preload()
+{
+    return LoadImeModule();
 }
 
 bool CPS5ImeDialog::IsActive()

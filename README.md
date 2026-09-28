@@ -95,7 +95,8 @@ folder itself (`/data/homebrew/PPSA99420/kodi`).
 - **Sources:** SMB2/3 and NFS network shares, UPnP; USB drives and `/data`
   with PS5-Lapy-JB-Daemon loaded (see *USB drives*).
 - **Library:** thumbnails, databases and settings persist between sessions.
-- **DualSense** navigation (buttons mapped to Kodi's keyboard actions).
+- **DualSense** navigation (buttons mapped to Kodi's keyboard actions), and
+  the PS5's own on-screen keyboard for text entry (contributed by Notedop).
 
 ## What doesn't yet
 
@@ -113,8 +114,7 @@ folder itself (`/data/homebrew/PPSA99420/kodi`).
 - **Dolby/DTS passthrough** (including TrueHD and DTS-HD at 8 channels and
   192 kHz): offered to Kodi's *Allow passthrough*, but not yet confirmed to
   reach a receiver intact.
-- **DualSense as a game controller** (joystick add-on) and the on-screen
-  keyboard.
+- **DualSense as a game controller** (joystick add-on).
 - **The Media tab:** Kodi is a Games title (the GL driver fails in the Media
   category's sandbox).
 - **The player debug overlay (L3)** raises the output to ~120 Hz during VRR.
@@ -202,7 +202,7 @@ what gets fixed.
 ## Building
 
 Kodi is not forked. This repository is an **overlay**: a `ps5` platform directory
-copied on top of a stock Kodi checkout, fourteen small Kodi patches, C shims that
+copied on top of a stock Kodi checkout, fifteen small Kodi patches, C shims that
 fill gaps in what a title's system libraries provide, and the scripts that set
 up the cross toolchain, configure, build and package.
 
@@ -254,12 +254,12 @@ overlay/                        copied onto a Kodi checkout by scripts/20-config
   cmake/scripts/ps5/            ArchSetup / PathSetup / Install / Macros for the ps5 core system
   cmake/treedata/ps5/           which xbmc/ subdirectories are compiled
   xbmc/platform/ps5/            main.cpp, CPlatformPS5, CPU/GPU info, klog log sink, strptime
-    audio/ input/ network/ storage/    AESinkPS5, PS5PadInput, NetworkPS5, PS5StorageProvider
+    audio/ input/ network/ storage/    AESinkPS5, PS5PadInput + the native keyboard (PS5ImeDialog), NetworkPS5, PS5StorageProvider
     filesystem/                 smb:// over libsmb2 (SMB2Session, CSMB2File, CSMB2Directory)
     video/                      hardware decoder (CVideoDec2, CDVDVideoCodecPS5), zero-copy buffers and renderer
     sce/                        clean-room prototypes of the Sony libraries used
   xbmc/windowing/ps5/           CWinSystemPS5, CWinSystemPS5GLContext (EGL), VRR pacing, HDR output
-patches/kodi/                   fourteen Kodi patches (charset, SMB hooks, log sink, renderer, refresh, HDR framebuffer, HLG shader) + manifest
+patches/kodi/                   fifteen Kodi patches (charset, SMB hooks, log sink, renderer, refresh, HDR framebuffer, HLG shader, native keyboard) + manifest
 patches/ps5-opengl/             Kodi's additions to the GL driver/runtime (zero-copy textures, HDR scanout switch), written against the ps5-opengl revision in PS5-OPENGL-COMMIT
 patches/                        fix for older native-app template converters
 shims/native-app/               C library gaps, compiled into the title
@@ -361,7 +361,7 @@ sed -n "$((N+1)),$((N+40))p" kodi-klog.txt | grep -a -o "^# [0-9a-f]\{16\}" | aw
 3. The player debug overlay (L3) during VRR: keep the paced rate
    (`kodi-debug` logs presented frames, pacing and render time every 5 s).
 4. GL driver: cheaper clears and draws at 4K, runtime-selected render size.
-5. A DualSense joystick driver, the on-screen keyboard.
+5. A DualSense joystick driver.
 6. Passthrough confirmation: whether the PS5 passes IEC 61937 PCM through
    bit-exactly (2 channels first, then the 8-channel HBR formats).
 
@@ -404,6 +404,7 @@ and development news.
 - Ronnie Sahlberg: [libsmb2](https://github.com/sahlberg/libsmb2).
 - The PS5 SDL backend, whose observations of the audio and pad libraries the
   `sce/` headers restate.
+- Notedop: the native on-screen keyboard (PS5 IME dialog).
 - Team Kodi, for Kodi itself.
 
 ## License

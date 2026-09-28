@@ -37,6 +37,9 @@ public:
   Outcome Poll(std::string& text);
   void Close();
 
+  // Load the IME dialog system module now: once the sandbox has been opened
+  // by the jailbreak daemon (after the first frame), module loads fail.
+  static bool Preload();
   static bool IsActive();
   static void NotifyInputActivity();
   static bool ConsumeInputActivity();
