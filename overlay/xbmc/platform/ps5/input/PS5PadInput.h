@@ -51,6 +51,7 @@ private:
     int32_t handle{-1};
     uint32_t lastButtons{0};
     uint32_t heldRepeat{0}; // direction bit currently auto-repeating
+    bool waitForRelease{false};
     std::chrono::steady_clock::time_point nextRepeat{};
   };
 

@@ -12,3 +12,4 @@
 0012-refresh-vrr-playback-only-ps5.patch
 0013-default-framebuffer-hdr-ps5.patch
 0014-hlg-to-pq-shader-ps5.patch
+0015-native-keyboard-ps5.patch

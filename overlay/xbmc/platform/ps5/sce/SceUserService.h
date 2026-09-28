@@ -18,6 +18,7 @@
 
 extern "C"
 {
+  int sceUserServiceGetForegroundUser(int32_t* userId);
   int sceUserServiceInitialize(const void* params);
   int sceUserServiceTerminate(void);
   // Fills 4 slots; unused slots are -1.
