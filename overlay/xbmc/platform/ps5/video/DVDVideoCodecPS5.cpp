@@ -165,6 +165,7 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
     m_decoder->Close();
     return false;
   }
+  m_hints = hints;
   if (!SetupBitstreamFilter(hints))
   {
     m_decoder->Close();
@@ -211,7 +212,9 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
   if (m_hasLightMetadata)
     m_lightMetadata = *hints.contentLightMetadata;
 
-  m_hold = m_decoder->PipelineDepth() > 1 ? m_decoder->PipelineDepth() - 1 : 0;
+  // Pictures come back complete in the frame offered with the same call, at
+  // any pipeline depth (traced on hardware), so nothing is held back.
+  m_hold = 0;
   m_trace = 30;
   m_processInfo.SetVideoDecoderName(GetName(), true);
   m_processInfo.SetVideoPixelFormat(m_tenBit ? "p010 (lsb)" : "nv12");
@@ -836,8 +839,17 @@ void CDVDVideoCodecPS5::Reset()
   CloseDeinterlacer(); // set up again with the next picture
   m_deintPts.clear();
   m_deintOutputs = 0;
+  // The Annex-B filter injects SPS/PPS once, on its first packet. A plain
+  // av_bsf_flush() does not re-arm that, so after a seek the first IDR would
+  // reach the decoder without parameter sets (EVO Player's #57: pictures
+  // decoded against nothing, or 0x811d0303 on every access unit). A fresh
+  // filter injects them again.
   if (m_bsf)
-    av_bsf_flush(m_bsf);
+  {
+    av_bsf_free(&m_bsf);
+    if (!SetupBitstreamFilter(m_hints))
+      CLog::Log(LOGERROR, "CDVDVideoCodecPS5: cannot rebuild the bitstream filter after a seek");
+  }
   m_errorsInRow = 0;
   m_codecControlFlags = 0;
 }

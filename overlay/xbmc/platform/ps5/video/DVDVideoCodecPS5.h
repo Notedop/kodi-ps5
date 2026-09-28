@@ -11,6 +11,7 @@
 #include "VideoBufferPS5.h"
 #include "VideoDec2.h"
 #include "cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h"
+#include "cores/VideoPlayer/DVDStreamInfo.h"
 
 #include <deque>
 #include <cstdlib>
@@ -67,6 +68,7 @@ private:
   };
 
   bool SetupBitstreamFilter(const CDVDStreamInfo& hints);
+  CDVDStreamInfo m_hints; // for rebuilding the bitstream filter on a seek
   bool DecodeOne(const uint8_t* data, size_t size);
   bool Keep(const VideoDec2Picture& picture);
   // A returned picture may still be being written when the pipeline is deeper
@@ -107,7 +109,6 @@ private:
   unsigned m_height = 0;
   unsigned m_displayWidth = 0;
   unsigned m_displayHeight = 0;
-  CDVDStreamInfo* m_hints = nullptr;
   AVColorSpace m_colorSpace = AVCOL_SPC_UNSPECIFIED;
   AVColorPrimaries m_colorPrimaries = AVCOL_PRI_UNSPECIFIED;
   AVColorTransferCharacteristic m_colorTransfer = AVCOL_TRC_UNSPECIFIED;
