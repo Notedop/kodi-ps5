@@ -556,6 +556,9 @@ bool CVideoDec2::Decode(const uint8_t* au, size_t size, bool& gotPicture,
 
   const int32_t rc = sceVideodec2Decode(m_decoder, &input, &frame, &output);
   picture->immediate = output.buffer == frameBuffer;
+  picture->offeredIndex = frameIndex;
+  picture->offeredAccepted = frame.accepted != 0;
+  picture->pictureCount = output.pictureCount;
   if (m_pooled && frame.accepted)
   {
     std::lock_guard<std::mutex> lock(m_frameMutex);

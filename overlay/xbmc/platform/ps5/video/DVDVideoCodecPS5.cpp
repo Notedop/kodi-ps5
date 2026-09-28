@@ -212,6 +212,7 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
     m_lightMetadata = *hints.contentLightMetadata;
 
   m_hold = m_decoder->PipelineDepth() > 1 ? m_decoder->PipelineDepth() - 1 : 0;
+  m_trace = 30;
   m_processInfo.SetVideoDecoderName(GetName(), true);
   m_processInfo.SetVideoPixelFormat(m_tenBit ? "p010 (lsb)" : "nv12");
   if (m_vp9)
@@ -417,7 +418,9 @@ bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
   const auto decodeStart = std::chrono::steady_clock::now();
   VideoDec2Picture picture;
   std::string error;
-  if (!m_decoder->Decode(data, size, gotPicture, &picture, error))
+  const bool decoded = m_decoder->Decode(data, size, gotPicture, &picture, error);
+  Trace("return", picture, decoded && gotPicture);
+  if (!decoded)
   {
     if (m_errorsInRow++ < 5)
       CLog::Log(LOGWARNING, "CDVDVideoCodecPS5: {}", error);
@@ -489,6 +492,35 @@ bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
   if (gotPicture)
     Accept(picture);
   return true;
+}
+
+std::string CDVDVideoCodecPS5::LumaSamples(const VideoDec2Picture& picture) const
+{
+  // five points: top-left, centre, bottom-left, bottom-right, three-quarters
+  if (!picture.data || picture.width == 0 || picture.height == 0)
+    return "-";
+  const unsigned w = std::min(m_width, picture.width), h = std::min(m_height, picture.height);
+  const unsigned bytes = picture.bitDepth > 8 ? 2 : 1;
+  auto at = [&](unsigned x, unsigned y) -> unsigned
+  {
+    const uint8_t* p = picture.data + static_cast<size_t>(y) * picture.pitch + static_cast<size_t>(x) * bytes;
+    return bytes == 2 ? *reinterpret_cast<const uint16_t*>(p) : *p;
+  };
+  return StringUtils::Format("{} {} {} {} {}", at(8, 8), at(w / 2, h / 2), at(8, h - 8),
+                             at(w - 8, h - 8), at(3 * w / 4, 3 * h / 4));
+}
+
+void CDVDVideoCodecPS5::Trace(const char* stage, const VideoDec2Picture& picture, bool gotPicture)
+{
+  if (!m_timeDecodes || m_trace == 0)
+    return;
+  --m_trace;
+  CLog::Log(LOGINFO,
+            "CDVDVideoCodecPS5 (trace {}): offered frame {} ({}), picture {} frame {} (count {}, "
+            "immediate {}), luma {}",
+            stage, picture.offeredIndex, picture.offeredAccepted ? "accepted" : "refused",
+            gotPicture ? "yes" : "no", gotPicture ? picture.frameIndex : -1, picture.pictureCount,
+            picture.immediate ? "yes" : "no", gotPicture ? LumaSamples(picture) : "-");
 }
 
 bool CDVDVideoCodecPS5::Accept(const VideoDec2Picture& picture)
@@ -591,6 +623,9 @@ void CDVDVideoCodecPS5::DetectAlignment(const VideoDec2Picture& picture, unsigne
 
 bool CDVDVideoCodecPS5::Keep(const VideoDec2Picture& picture)
 {
+  if (m_timeDecodes && m_trace > 0)
+    CLog::Log(LOGINFO, "CDVDVideoCodecPS5 (trace hand-off): frame {}, luma {}", picture.frameIndex,
+              LumaSamples(picture));
   // Visible area: the stream's size, never more than what was decoded.
   const unsigned width = std::min(m_width, picture.width);
   const unsigned height = std::min(m_height, picture.height);
@@ -794,6 +829,7 @@ void CDVDVideoCodecPS5::Reset()
   ReleaseHeld();
   m_pts.clear();
   m_skipRasl = m_hevc;
+  m_trace = 30;
   m_decoder->Reset();
   m_pendingAus.clear();
   m_vp9PendingShown.clear();

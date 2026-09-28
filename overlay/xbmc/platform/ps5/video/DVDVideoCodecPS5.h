@@ -73,6 +73,12 @@ private:
   // than 1; it is complete once `depth-1` later pictures have come back. So
   // pictures wait here that long before Keep() (drained at end of stream).
   bool Accept(const VideoDec2Picture& picture);
+  // kodi-debug trace of the first pictures after an open or a reset: frames
+  // offered/accepted/returned, and luma samples of the returned picture at
+  // return and at hand-off (black regions read 0 or 16)
+  unsigned m_trace = 0;
+  std::string LumaSamples(const VideoDec2Picture& picture) const;
+  void Trace(const char* stage, const VideoDec2Picture& picture, bool gotPicture);
   void ReleaseHeld();
   std::deque<VideoDec2Picture> m_held;
   unsigned m_hold = 0;

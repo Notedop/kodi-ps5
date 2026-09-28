@@ -46,6 +46,11 @@ struct VideoDec2Picture
   uint32_t bitDepth = 8; // 8: NV12; 10: 16 bits per sample, semi-planar
   int frameIndex = -1;   // pooled mode: the frame to hand back with ReleaseFrame
   bool immediate = false; // came out of the frame offered with this access unit
+  // trace (kodi-debug): the frame offered with this call, whether the decoder
+  // took it, and the decoder's own picture count for the returned output
+  int offeredIndex = -1;
+  bool offeredAccepted = false;
+  unsigned pictureCount = 0;
 };
 
 class CVideoDec2
