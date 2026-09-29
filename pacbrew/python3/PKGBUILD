@@ -15,8 +15,9 @@ options=(!strip libtool staticlibs)
 source=("https://www.python.org/ftp/python/$pkgver/Python-$pkgver.tar.xz"
         "cross-freebsd.patch"
         "no-subprocess.patch"
-        "static-compile.patch")
-sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
+        "static-compile.patch"
+        "ps5_compat.h")
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 groups=('ps5-payload-dev')
 depends=('ps5-payload-zlib' 'ps5-payload-expat' 'ps5-payload-xz' 'ps5-payload-bzip2'
          'ps5-payload-openssl' 'ps5-payload-sqlite')
@@ -68,6 +69,10 @@ build() {
 
     # 2. The PS5 library
     source "${PS5_PAYLOAD_SDK}/toolchain/prospero.sh"
+    # Prototypes the SDK headers lack for functions the target does provide
+    # (getentropy from Kodi's shim, pthread_getname_np from libkernel); see
+    # ps5_compat.h. Cross build only - the host build must not see it.
+    export CPPFLAGS="${CPPFLAGS:-} -include $srcdir/ps5_compat.h"
     mkdir -p build-ps5 && cd build-ps5
     ../Python-$pkgver/configure --prefix="${PREFIX}" \
         --host=x86_64-pc-freebsd --build=x86_64-pc-linux-gnu \
