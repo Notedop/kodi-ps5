@@ -74,8 +74,9 @@ endif()
 # -lprocstat: stub from shims/libprocstat (scripts/12); exiv2 references
 # libprocstat on any __FreeBSD__ target for its library-info dump.
 # libSceVideodec2: stub from scripts/17-build-sce-stubs.sh
-# iconv: handled inline by shims/native-app/iconv_gnu.c (embedded CP437 table,
-# no external library needed).
+# iconv: the system libc's (Unicode encodings only). CP437, which the zip
+# reader needs for entry names, comes from shims/native-app/iconv_gnu.c,
+# linked with --wrap by scripts/30-deploy.sh; no iconv library is linked.
 set(SYSTEM_LDFLAGS -lSceAudioOut -lScePad -lSceUserService -lSceImeDialog -lSceRegMgr -lSceNetCtl -lSceSysmodule
                    -lSceVideodec2 -lprocstat -lsmb2)
 

@@ -81,9 +81,7 @@ cp "$HERE/shims/native-app/libc_locale.c" "$APP/src/"  # C-locale xlocale layer 
 cp "$HERE/shims/native-app/libc_net.c" "$APP/src/"     # getaddrinfo & co on Sony's resolver
 cp "$HERE/shims/native-app/thread_stack.c" "$APP/src/" # >= 1 MiB thread stacks (--wrap=pthread_create)
 cp "$HERE/shims/native-app/pipe_fallback.c" "$APP/src/" # pipe() via socketpair, fcntl F_SETFD as success (--wrap=pipe, --wrap=fcntl)
-cp "$HERE/shims/native-app/iconv_gnu.c" "$APP/src/"
-
-      # iconv via GNU libiconv: code pages for zip entry names (--wrap=iconv*)
+cp "$HERE/shims/native-app/iconv_gnu.c" "$APP/src/"    # CP437 -> UTF-8 for zip entry names (--wrap=iconv_open/iconv/iconv_close); Unicode pairs stay with the system iconv
 # libScePosixForWebKit is a browser-only system module: a title never gets it,
 # and everything imported from it stays at address 0 (first launch: isatty()).
 # Remove its link stub so nothing can bind to it; the shims above cover what
