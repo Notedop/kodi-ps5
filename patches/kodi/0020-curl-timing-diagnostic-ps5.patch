@@ -1,0 +1,54 @@
+ps5: temporary curl timing instrumentation (diagnostic).
+
+Add-on installs stall for tens of seconds per file even though the bytes
+arrive in ~1s, and the stalls line up with CheckIdle closing pooled sessions.
+To locate the cost precisely rather than guess, log (PS5 only) how long
+easy_reset() in easy_release() and the handle teardown in CheckIdle() take
+when either exceeds 50 ms. No behaviour change. To be reverted once the slow
+call is identified and fixed.
+--- a/xbmc/filesystem/DllLibCurl.cpp
++++ b/xbmc/filesystem/DllLibCurl.cpp
+@@ -151,6 +151,9 @@ void DllLibCurlGlobal::CheckIdle()
+ 
+     if (!it->m_busy && duration.count() > idletime)
+     {
++#if defined(TARGET_PS5)
++      auto _tc = std::chrono::steady_clock::now();
++#endif
+       CLog::Log(LOGDEBUG, "{} - Closing session to {}://{} (easy={}, multi={})", __FUNCTION__,
+                 it->m_protocol, it->m_hostname, fmt::ptr(it->m_easy), fmt::ptr(it->m_multi));
+ 
+@@ -160,6 +163,14 @@ void DllLibCurlGlobal::CheckIdle()
+         easy_cleanup(it->m_easy);
+       if (it->m_multi)
+         multi_cleanup(it->m_multi);
++#if defined(TARGET_PS5)
++      {
++        auto _ms = std::chrono::duration_cast<std::chrono::milliseconds>(
++                       std::chrono::steady_clock::now() - _tc).count();
++        if (_ms > 50)
++          CLog::Log(LOGINFO, "PS5 curl-timing: CheckIdle close took {} ms", _ms);
++      }
++#endif
+ 
+       it = m_sessions.erase(it);
+       continue;
+@@ -254,7 +265,18 @@ void DllLibCurlGlobal::easy_release(CURL_HANDLE** easy_handle, CURLM** multi_han
+     {
+       /* reset session so next caller doesn't reuse options, only connections */
+       /* will reset verbose too so it won't print that it closed connections on cleanup*/
++#if defined(TARGET_PS5)
++      {
++        auto _t0 = std::chrono::steady_clock::now();
++        easy_reset(easy);
++        auto _ms = std::chrono::duration_cast<std::chrono::milliseconds>(
++                       std::chrono::steady_clock::now() - _t0).count();
++        if (_ms > 50)
++          CLog::Log(LOGINFO, "PS5 curl-timing: easy_reset took {} ms", _ms);
++      }
++#else
+       easy_reset(easy);
++#endif
+       it.m_busy = false;
+       it.m_idletimestamp = std::chrono::steady_clock::now();
+       return;
