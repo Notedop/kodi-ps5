@@ -821,3 +821,147 @@ ssize_t readlink(const char* restrict path, char* restrict buf, size_t size)
   errno = EINVAL;
   return -1;
 }
+
+/*
+ * getcwd(3) / realpath(3): both come from the clean-room libc.prx in a title,
+ * where getcwd is unimplemented - its import resolved to a garbage address
+ * and Python's frozen getpath (which computes sys.path at interpreter start)
+ * crashed on the first call. Kodi itself never calls either, which is why it
+ * went unnoticed. A sandboxed title has no meaningful working directory, so
+ * keep one ourselves: it starts as $HOME (the writable save-data area) or "/",
+ * and chdir() - a real libkernel syscall - is mirrored so getcwd stays
+ * consistent with it. realpath does no symlink resolution (readlink above
+ * reports there are none) - it just makes the path absolute.
+ */
+#include <limits.h>
+#include <stdio.h>
+#ifndef PATH_MAX
+#define PATH_MAX 1024
+#endif
+
+static char g_cwd[PATH_MAX] = "";
+
+static void cwd_init(void)
+{
+  if (g_cwd[0])
+    return;
+  const char* home = getenv("HOME");
+  if (home && home[0] == '/' && strlen(home) < sizeof g_cwd)
+    strcpy(g_cwd, home);
+  else
+    strcpy(g_cwd, "/");
+}
+
+char* getcwd(char* buf, size_t size)
+{
+  cwd_init();
+  size_t need = strlen(g_cwd) + 1;
+  if (!buf)
+  {
+    if (size == 0)
+      size = need;
+    if (size < need)
+    {
+      errno = ERANGE;
+      return NULL;
+    }
+    buf = (char*)malloc(size);
+    if (!buf)
+    {
+      errno = ENOMEM;
+      return NULL;
+    }
+  }
+  else if (size < need)
+  {
+    errno = size == 0 ? EINVAL : ERANGE;
+    return NULL;
+  }
+  memcpy(buf, g_cwd, need);
+  return buf;
+}
+
+/* Mirror chdir() into our cwd so getcwd() follows it. The real libkernel
+ * chdir is called through its wrapped name; see 30-deploy.sh (--wrap=chdir). */
+int __real_chdir(const char* path);
+int __wrap_chdir(const char* path)
+{
+  int rc = __real_chdir(path);
+  if (rc == 0 && path && path[0])
+  {
+    cwd_init();
+    if (path[0] == '/')
+    {
+      if (strlen(path) < sizeof g_cwd)
+        strcpy(g_cwd, path);
+    }
+    else
+    {
+      char tmp[PATH_MAX];
+      int n = snprintf(tmp, sizeof tmp, "%s/%s", strcmp(g_cwd, "/") == 0 ? "" : g_cwd, path);
+      if (n > 0 && (size_t)n < sizeof tmp)
+        strcpy(g_cwd, tmp);
+    }
+  }
+  return rc;
+}
+
+char* realpath(const char* restrict path, char* restrict resolved)
+{
+  if (!path || !path[0])
+  {
+    errno = ENOENT;
+    return NULL;
+  }
+  char tmp[PATH_MAX];
+  if (path[0] == '/')
+  {
+    if (strlen(path) >= sizeof tmp)
+    {
+      errno = ENAMETOOLONG;
+      return NULL;
+    }
+    strcpy(tmp, path);
+  }
+  else
+  {
+    cwd_init();
+    int n = snprintf(tmp, sizeof tmp, "%s/%s", strcmp(g_cwd, "/") == 0 ? "" : g_cwd, path);
+    if (n <= 0 || (size_t)n >= sizeof tmp)
+    {
+      errno = ENAMETOOLONG;
+      return NULL;
+    }
+  }
+  /* collapse "/./" and "//" runs; leave ".." alone (no symlinks to worry about
+   * but a stat-free normalization must not invent paths) */
+  char out[PATH_MAX];
+  size_t o = 0;
+  for (size_t i = 0; tmp[i]; )
+  {
+    if (tmp[i] == '/')
+    {
+      if (o == 0 || out[o - 1] != '/')
+        out[o++] = '/';
+      i++;
+      if (tmp[i] == '.' && (tmp[i + 1] == '/' || tmp[i + 1] == '\0'))
+        i++;
+      continue;
+    }
+    out[o++] = tmp[i++];
+  }
+  if (o > 1 && out[o - 1] == '/')
+    o--;
+  out[o] = '\0';
+  if (!resolved)
+  {
+    resolved = (char*)malloc(o + 1);
+    if (!resolved)
+    {
+      errno = ENOMEM;
+      return NULL;
+    }
+  }
+  memcpy(resolved, out, o + 1);
+  return resolved;
+}
