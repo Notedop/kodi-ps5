@@ -386,26 +386,40 @@ int main(int argc, char* argv[])
     unlink("/app0/kodi-jitprobe");
   }
 
-  if (!std::getenv("HOME"))
+  // Kodi writes everything under $HOME/.kodi, and the only place a title may
+  // write is its own save-data area, /download0 (a private read-write image
+  // sized by downloadDataSize in sce_sys/param.json). /app0 is the read-only
+  // application image and is never a write target: some loaders leave it
+  // loosely mounted so small writes seem to work, but real writes (an add-on
+  // download) then hang, so it is not even a fallback. /data is the shared
+  // homebrew filesystem, reachable only after the jailbreak daemon opens the
+  // sandbox and useful for a development copy; it is opt-in through
+  // kodi-home-data rather than chosen silently, so the shipped title always
+  // keeps its state in its own save data.
+  //
+  // HOME selection only happens if HOME is unset; the environment below
+  // (PYTHONHOME, TMPDIR, SSL_CERT_FILE) is derived from the home dir and must
+  // be applied on every launch, whether or not we set HOME this time - some
+  // loaders start the title with HOME already set, and Python add-ons, temp
+  // files and Python https all depend on this env regardless.
+  std::string chosen;
+  if (const char* existing = std::getenv("HOME"))
   {
-    // Kodi writes everything under $HOME/.kodi, and the only place a title may
-    // write is its own save-data area, /download0 (a private read-write image
-    // sized by downloadDataSize in sce_sys/param.json). /app0 is the read-only
-    // application image and is never a write target: some loaders leave it
-    // loosely mounted so small writes seem to work, but real writes (an add-on
-    // download) then hang, so it is not even a fallback. /data is the shared
-    // homebrew filesystem, reachable only after the jailbreak daemon opens the
-    // sandbox and useful for a development copy; it is opt-in through
-    // kodi-home-data rather than chosen silently, so the shipped title always
-    // keeps its state in its own save data.
-    const char* chosen = "/download0";
+    chosen = existing;
+    Klogf("[kodi-ps5] HOME already set to %s\n", chosen.c_str());
+  }
+  else
+  {
+    chosen = "/download0";
     if (SwitchPresent("/app0/kodi-home-data") && ProbeHome("/data/kodi"))
       chosen = "/data/kodi";
-    if (!ProbeHome(chosen))
+    if (!ProbeHome(chosen.c_str()))
       Klogf("[kodi-ps5] %s is not writable; Kodi will fail to start (is downloadDataSize set in "
-            "param.json?)\n", chosen);
-    Klogf("[kodi-ps5] HOME=%s\n", chosen);
-    setenv("HOME", chosen, 1);
+            "param.json?)\n", chosen.c_str());
+    Klogf("[kodi-ps5] HOME=%s\n", chosen.c_str());
+    setenv("HOME", chosen.c_str(), 1);
+  }
+  {
     // Python add-ons: the standard library ships in the title (Install.cmake)
     struct stat pythonLib;
     if (stat("/app0/share/kodi/python/lib/python3.14", &pythonLib) == 0)
@@ -417,7 +431,7 @@ int main(int argc, char* argv[])
     // Python's tempfile (and anything else honoring TMPDIR) needs a writable
     // temp directory; a title has no /tmp. Kodi's own special://temp lives in
     // the same place, created here so it exists before its first use.
-    const std::string tmpDir = std::string(chosen) + "/.kodi/temp";
+    const std::string tmpDir = chosen + "/.kodi/temp";
     MakeDirs(tmpDir);
     setenv("TMPDIR", tmpDir.c_str(), 1);
     // OpenSSL's compiled-in default verify paths point nowhere in a title, so
