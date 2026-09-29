@@ -13,8 +13,15 @@ CheckIdle() now only splices the expired, non-busy sessions out of the live
 pool under the lock (fast) and defers their teardown to a background CJob, so
 the potentially-blocking curl cleanup never runs on the app thread and never
 holds the lock. Each closed session was already idle and not busy, so no other
-thread references its handles. If the job manager cannot accept the job (e.g.
-during shutdown) the teardown is done inline so handles are not leaked.
+thread references its handles.
+
+Ownership: CJobManager::AddJob deletes the job and returns 0 (never a valid
+job id) when it cannot queue it, e.g. during shutdown, so the job cannot be
+used after AddJob at all. The job therefore takes a copy of the session list
+and the caller keeps the original: on failure the teardown runs inline from
+the caller's list, so the handles are not leaked and nothing touches the
+deleted job. SSession destruction never closes the handles, so the unused
+copy is destroyed without effect in either branch.
 
 --- a/xbmc/filesystem/DllLibCurl.cpp
 +++ b/xbmc/filesystem/DllLibCurl.cpp
@@ -29,7 +36,7 @@ during shutdown) the teardown is done inline so handles are not leaked.
  #include "utils/log.h"
  
  #include <assert.h>
-@@ -136,35 +139,86 @@
+@@ -136,36 +139,96 @@ DllLibCurlGlobal::~DllLibCurlGlobal()
    curl_global_cleanup();
  }
  
@@ -45,11 +52,29 @@ during shutdown) the teardown is done inline so handles are not leaked.
 +// are now spliced out of the live pool under the lock (fast) and their teardown
 +// is done here, off the application thread. Each closed session was already
 +// idle and not busy, so no other thread references its handles.
++void CloseSessions(DllLibCurlGlobal& curl, const std::vector<DllLibCurlGlobal::SSession>& sessions)
++{
++  for (const auto& s : sessions)
++  {
++    if (s.m_multi && s.m_easy)
++      curl.multi_remove_handle(s.m_multi, s.m_easy);
++    if (s.m_easy)
++      curl.easy_cleanup(s.m_easy);
++    if (s.m_multi)
++      curl.multi_cleanup(s.m_multi);
++  }
++}
++
 +class CCurlCloseJob : public CJob
 +{
 +public:
-+  explicit CCurlCloseJob(std::vector<DllLibCurlGlobal::SSession> sessions, DllLibCurlGlobal* owner)
-+    : m_sessions(std::move(sessions)), m_owner(owner)
++  // Takes its own copy of the session list: CJobManager::AddJob deletes the
++  // job when it cannot queue it (shutdown) and may return before the caller
++  // can tell, so the caller keeps the original list and must stay able to
++  // close the handles itself. SSession destruction never touches the handles,
++  // so whichever copy goes unused is destroyed without effect.
++  CCurlCloseJob(const std::vector<DllLibCurlGlobal::SSession>& sessions, DllLibCurlGlobal* owner)
++    : m_sessions(sessions), m_owner(owner)
 +  {
 +  }
 +
@@ -57,15 +82,7 @@ during shutdown) the teardown is done inline so handles are not leaked.
 +
 +  bool DoWork() override
 +  {
-+    for (auto& s : m_sessions)
-+    {
-+      if (s.m_multi && s.m_easy)
-+        m_owner->multi_remove_handle(s.m_multi, s.m_easy);
-+      if (s.m_easy)
-+        m_owner->easy_cleanup(s.m_easy);
-+      if (s.m_multi)
-+        m_owner->multi_cleanup(s.m_multi);
-+    }
++    CloseSessions(*m_owner, m_sessions);
 +    return true;
 +  }
 +
@@ -97,6 +114,16 @@ during shutdown) the teardown is done inline so handles are not leaked.
      {
 -      CLog::Log(LOGDEBUG, "{} - Closing session to {}://{} (easy={}, multi={})", __FUNCTION__,
 -                it->m_protocol, it->m_hostname, fmt::ptr(it->m_easy), fmt::ptr(it->m_multi));
+-
+-      if (it->m_multi && it->m_easy)
+-        multi_remove_handle(it->m_multi, it->m_easy);
+-      if (it->m_easy)
+-        easy_cleanup(it->m_easy);
+-      if (it->m_multi)
+-        multi_cleanup(it->m_multi);
+-
+-      it = m_sessions.erase(it);
+-      continue;
 +      auto now = std::chrono::steady_clock::now();
 +      auto duration =
 +          std::chrono::duration_cast<std::chrono::milliseconds>(now - it->m_idletimestamp);
@@ -110,30 +137,21 @@ during shutdown) the teardown is done inline so handles are not leaked.
 +        continue;
 +      }
 +      ++it;
-+    }
-+  }
- 
--      if (it->m_multi && it->m_easy)
--        multi_remove_handle(it->m_multi, it->m_easy);
--      if (it->m_easy)
--        easy_cleanup(it->m_easy);
--      if (it->m_multi)
--        multi_cleanup(it->m_multi);
+     }
+-    ++it;
+   }
++
 +  if (expired.empty())
 +    return;
- 
--      it = m_sessions.erase(it);
--      continue;
--    }
--    ++it;
-+  // Defer the potentially-blocking teardown off the application thread. If the
-+  // job manager cannot take it (e.g. during shutdown), fall back to closing
-+  // inline so the handles are not leaked.
-+  CCurlCloseJob* job = new CCurlCloseJob(std::move(expired), this);
-+  if (CServiceBroker::GetJobManager()->AddJob(job, nullptr, CJob::PRIORITY_LOW) == 0)
-+  {
-+    job->DoWork();
-+    delete job;
-   }
++
++  // Defer the potentially-blocking teardown off the application thread. AddJob
++  // deletes the job and returns 0 when it cannot queue it (shutdown; 0 is
++  // never a valid job id), so the job must not be touched afterwards: it got a
++  // copy of the list, and on failure the teardown runs inline from ours so the
++  // handles are not leaked.
++  if (CServiceBroker::GetJobManager()->AddJob(new CCurlCloseJob(expired, this), nullptr,
++                                              CJob::PRIORITY_LOW) == 0)
++    CloseSessions(*this, expired);
  }
  
+ void DllLibCurlGlobal::easy_acquire(const char* protocol,

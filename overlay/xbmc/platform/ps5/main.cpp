@@ -403,6 +403,21 @@ int main(int argc, char* argv[])
       setenv("PYTHONNOUSERSITE", "1", 1);
       Klog("[kodi-ps5] PYTHONHOME=/app0/share/kodi/python\n");
     }
+    // Python's tempfile (and anything else honoring TMPDIR) needs a writable
+    // temp directory; a title has no /tmp. Kodi's own special://temp lives in
+    // the same place, created here so it exists before its first use.
+    const std::string tmpDir = std::string(chosen) + "/.kodi/temp";
+    MakeDirs(tmpDir);
+    setenv("TMPDIR", tmpDir.c_str(), 1);
+    // OpenSSL's compiled-in default verify paths point nowhere in a title, so
+    // Python's ssl module (urllib & co in add-ons) would fail every https
+    // certificate check. Point the defaults at the CA bundle Kodi ships;
+    // Kodi's own curl passes its CAINFO explicitly and is unaffected.
+    struct stat caBundle;
+    if (stat("/app0/share/kodi/system/certs/cacert.pem", &caBundle) == 0)
+      setenv("SSL_CERT_FILE", "/app0/share/kodi/system/certs/cacert.pem", 1);
+    else
+      Klog("[kodi-ps5] no cacert.pem in the title: Python https will fail verification\n");
   }
   // A marker in the save data, so the folder is identifiable as Kodi's on disk
   // (over FTP) as well as in the console's data manager.

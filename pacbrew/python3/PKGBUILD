@@ -90,6 +90,12 @@ package() {
         --exclude=ensurepip --exclude=__pycache__ -cf - .) |
         tar -xf - -C "${DESTDIR}${PREFIX}/lib/python3.14"
     cp "$(cat pybuilddir.txt)"/_sysconfigdata*.py "${DESTDIR}${PREFIX}/lib/python3.14/"
+    # Byte-compile the stdlib with the matching interpreter, hash-validated
+    # (PEP 552), so the .pyc stay valid after FTP uploads lose mtimes; /app0
+    # is read-only, so without them every import would try (and fail) to
+    # write __pycache__.
+    "$srcdir/hostpython/bin/python3.14" -m compileall -q -j0 \
+        --invalidation-mode checked-hash "${DESTDIR}${PREFIX}/lib/python3.14"
     install -Dm644 Misc/python.pc "${DESTDIR}${PREFIX}/lib/pkgconfig/python-3.14.pc"
     install -Dm644 Misc/python-embed.pc "${DESTDIR}${PREFIX}/lib/pkgconfig/python-3.14-embed.pc"
     ${PS5_CROSS_FIX_ROOT} "${DESTDIR}/${PREFIX}"
