@@ -29,6 +29,10 @@ the one that works, and is what this loader uses.)
       symbol is a link error, not a runtime crash. Verified on the host: an
       add-on importing `operator new/delete` and `memcpy` binds them to the
       host's own instances (shared allocator) and runs correctly.
+      `HostExports.cpp` ships a **weak, empty** `g_host_exports` so the eboot
+      links and runs before any add-on table exists (Python needs none). The
+      generated assembly table defines a **strong** `g_host_exports` that
+      overrides it once a binary add-on is built.
 - [x] **Wired into the loader factory** (`PS5AddonLoader.{h,cpp}` +
       `patches/kodi/0017-ps5-binary-addon-inprocess-loader.patch`).
       `CPS5AddonLoader` implements `LibraryLoader` over `ps5elf`; the
