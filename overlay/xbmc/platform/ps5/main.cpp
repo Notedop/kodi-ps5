@@ -7,6 +7,7 @@
  */
 
 #include "application/AppEnvironment.h"
+#include "platform/ps5/BuildStamp.h"
 #include "application/AppParamParser.h"
 #include "application/AppParams.h"
 #include "platform/xbmc.h"
@@ -328,6 +329,7 @@ int main(int argc, char* argv[])
 {
   // Written straight to klog: visible even if everything after this fails.
   Klog("[kodi-ps5] main() reached\n");
+  Klogf("[kodi-ps5] build %s\n", KODI_PS5_BUILD_STAMP);
 
   struct sigaction signalHandler;
   std::memset(&signalHandler, 0, sizeof(signalHandler));

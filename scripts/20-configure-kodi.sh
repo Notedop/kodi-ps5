@@ -75,6 +75,16 @@ while IFS= read -r -d '' f; do
 done < <(find "$HERE/overlay" -type f -print0)
 echo "==> overlay: $OVERLAY_CHANGED files updated"
 
+# Build stamp: the git short-hash (plus -dirty) into BuildStamp.h on the tree,
+# so the build embeds it and every log says exactly which build it is.
+STAMP="$(cd "$HERE" && git describe --always --dirty 2>/dev/null || echo unknown)"
+STAMP_H="$KODI_SRC/xbmc/platform/ps5/BuildStamp.h"
+if [ -f "$STAMP_H" ]; then
+  sed -i "s/#define KODI_PS5_BUILD_STAMP \"[^\"]*\"/#define KODI_PS5_BUILD_STAMP \"$STAMP\"/" "$STAMP_H"
+  echo "==> build stamp: $STAMP"
+fi
+
+
 # Small patches to Kodi's own files that the overlay cannot express, in order.
 for p in "$HERE"/patches/kodi/*.patch; do
   [ -f "$p" ] || continue
