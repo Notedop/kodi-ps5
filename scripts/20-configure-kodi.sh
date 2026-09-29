@@ -130,7 +130,8 @@ if [ -f "$PY_ROOT/lib/libpython3.14.a" ]; then
   command -v swig >/dev/null && command -v java >/dev/null || {
     echo "!! Python is installed, but Kodi's bindings need swig and java: sudo apt-get install -y swig default-jre-headless"
     exit 1; }
-  PYTHON_ARGS=(-DENABLE_PYTHON=ON -DPYTHON_PATH=/user/homebrew -DPYTHON_VER=3.14
+  # Kodi 22 needs SWIG >= 4.5 for the bindings; distro SWIG is older, so build it in-tree.
+  PYTHON_ARGS=(-DENABLE_PYTHON=ON -DENABLE_INTERNAL_SWIG=ON -DPYTHON_PATH=/user/homebrew -DPYTHON_VER=3.14
                -DPython3_USE_STATIC_LIBS=ON)
   echo "==> Python 3.14 found in the sysroot: Python add-ons enabled"
 else
