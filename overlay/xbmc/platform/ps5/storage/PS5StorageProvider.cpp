@@ -8,14 +8,7 @@
 
 #include "PS5StorageProvider.h"
 
-#include "utils/StringUtils.h"
 #include "utils/log.h"
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/select.h>
-#include <fcntl.h>
-#include <arpa/inet.h>
-#include <unistd.h>
 
 #include "MediaSource.h"
 
@@ -46,60 +39,15 @@ void Add(std::vector<CMediaSource>& drives, const char* path, const char* name)
 }
 } // namespace
 
-namespace
-{
-// The homebrew loader's FTP server (etaHEN / ftpsrv) exposes the whole PS5
-// filesystem. It is the way to reach media placed on the console, so it is
-// offered as a source when it is actually listening - checked here, so the
-// entry appears only while the server is up. etaHEN commonly uses 1337, other
-// setups 2121.
-bool LocalPortOpen(uint16_t port)
-{
-  const int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0)
-    return false;
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(port);
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  // non-blocking connect with a short timeout: the server is local, so it
-  // answers at once or not at all
-  const int flags = fcntl(fd, F_GETFL, 0);
-  fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-  bool open = connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0;
-  if (!open && errno == EINPROGRESS)
-  {
-    fd_set wr;
-    FD_ZERO(&wr);
-    FD_SET(fd, &wr);
-    timeval tv{0, 200000}; // 200 ms
-    if (select(fd + 1, nullptr, &wr, nullptr, &tv) > 0)
-    {
-      int err = 0;
-      socklen_t len = sizeof(err);
-      open = getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0;
-    }
-  }
-  close(fd);
-  return open;
-}
-} // namespace
-
 void CPS5StorageProvider::GetLocalDrives(std::vector<CMediaSource>& localDrives)
 {
-  // No entries for the app's own areas (/app0, /download0, /data): media is
-  // never stored there. The only local source is the PS5 filesystem over the
-  // loader's FTP server, when it is running.
-  for (const uint16_t port : {static_cast<uint16_t>(1337), static_cast<uint16_t>(2121)})
-    if (LocalPortOpen(port))
-    {
-      CMediaSource share;
-      share.strPath = StringUtils::Format("ftp://127.0.0.1:{}/", port);
-      share.strName = "PS5 storage (FTP)";
-      share.m_iDriveType = SourceType::REMOTE;
-      localDrives.push_back(share);
-      break;
-    }
+  // No local drive entries. The app's own areas (/app0, /download0, /data)
+  // never hold media, and the loader's loopback FTP server is deliberately not
+  // offered as a source: browsing or refreshing it drives synchronous FTP
+  // Stat/connect round-trips that stall the GUI thread (folder-art probes,
+  // directory-provider refreshes). Removed for UI responsiveness. To reach
+  // console files, add ftp://127.0.0.1:2121/ (or :1337) as a source manually.
+  (void)localDrives;
 }
 namespace
 {

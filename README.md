@@ -45,10 +45,12 @@ Ready-to-install builds are on the [releases page](https://github.com/VivaLaVent
 1. Extract the release zip into `/data/homebrew/` on the console over FTP; it
    creates `/data/homebrew/PPSA99420/`.
 2. Register the title with ShadowMountPlus, then start Kodi from the home screen.
-3. Add your media under *Videos → Files → Add videos… → Browse*. Two local
-   entries appear on their own: **PS5 storage (FTP)**, the whole console
-   filesystem through the loader's FTP server (shown only while that server is
-   running), and each **USB drive** (see below). For network shares choose
+3. Add your media under *Videos → Files → Add videos… → Browse*. Each **USB
+   drive** appears on its own (see below). The console filesystem is not
+   offered as an automatic source: probing the loader's loopback FTP server on
+   the GUI thread stalls navigation, so it was removed. To browse console files
+   anyway, add `ftp://127.0.0.1:2121/` (or `:1337`) by hand via *Add network
+   location…*. For network shares choose
    **Add network location…**, protocol **Windows network (SMB)** or **NFS**,
    and enter the server's **IP address** (Windows/NetBIOS names are not
    resolved). SMB2 and SMB3 work, SMB1 does not.
@@ -210,7 +212,7 @@ what gets fixed.
 ## Building
 
 Kodi is not forked. This repository is an **overlay**: a `ps5` platform directory
-copied on top of a stock Kodi checkout, fifteen small Kodi patches, C shims that
+copied on top of a stock Kodi checkout, sixteen small Kodi patches, C shims that
 fill gaps in what a title's system libraries provide, and the scripts that set
 up the cross toolchain, configure, build and package.
 
@@ -270,7 +272,7 @@ overlay/                        copied onto a Kodi checkout by scripts/20-config
     video/                      hardware decoder (CVideoDec2, CDVDVideoCodecPS5), zero-copy buffers and renderer
     sce/                        clean-room prototypes of the Sony libraries used
   xbmc/windowing/ps5/           CWinSystemPS5, CWinSystemPS5GLContext (EGL), VRR pacing, HDR output
-patches/kodi/                   fifteen Kodi patches (charset, SMB hooks, log sink, renderer, refresh, HDR framebuffer, HLG shader, native keyboard) + manifest
+patches/kodi/                   sixteen Kodi patches (charset, SMB hooks, log sink, renderer, refresh, HDR framebuffer, HLG shader, native keyboard, curl idle-close off-thread) + manifest
 patches/ps5-opengl/             Kodi's additions to the GL driver/runtime (zero-copy textures, HDR scanout switch), written against the ps5-opengl revision in PS5-OPENGL-COMMIT
 patches/                        fix for older native-app template converters
 shims/native-app/               C library gaps, compiled into the title

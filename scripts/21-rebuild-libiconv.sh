@@ -37,6 +37,12 @@ if [ -z "$SRC" ]; then
   grep -q -- "--enable-extra-encodings" "$PB" || \
     sed -i 's/--enable-static --disable-shared/--enable-static --disable-shared --enable-extra-encodings/' "$PB"
   grep -q -- "--enable-extra-encodings" "$PB" || { echo "!! could not add --enable-extra-encodings to $PB"; exit 1; }
+  if [ "${FORCE_EXTRA:-0}" = 1 ]; then
+    # Belt-and-suspenders: define ENABLE_EXTRA on the compiler command line too,
+    # so the DOS/extra converters compile even if configure's AC_DEFINE is lost.
+    grep -q 'CPPFLAGS=.*ENABLE_EXTRA' "$PB" || \
+      sed -i 's#\./configure #CPPFLAGS="${CPPFLAGS:-} -DENABLE_EXTRA=1" ./configure #' "$PB"
+  fi
   ( cd "$REPO/libiconv" && rm -f ./*.pkg.tar.gz && rm -rf src pkg && makepkg -c -f -C \
       && sudo pacman --config "$REPO/pacman.conf" --noconfirm -U ./ps5-payload-libiconv-*.pkg.tar.gz )
 else
@@ -45,6 +51,7 @@ else
   source "$PS5_PAYLOAD_SDK/toolchain/prospero.sh"
   cd "$SRC"
   make distclean >/dev/null 2>&1 || true
+  [ "${FORCE_EXTRA:-0}" = 1 ] && export CPPFLAGS="${CPPFLAGS:-} -DENABLE_EXTRA=1"
   ./configure --prefix="${PS5_HBROOT}" --host=x86_64-pc-freebsd \
               --enable-static --disable-shared --enable-extra-encodings
   ${MAKE:-make} ${MAKEFLAGS}
@@ -53,12 +60,28 @@ else
 fi
 
 echo "==> verifying CP437 is now in $LA"
-if strings "$LA" 2>/dev/null | grep -qiE '(^|[^0-9])437([^0-9]|$)' && \
-   $NM "$LA" 2>/dev/null | grep -qi "cp437_"; then
-  echo "    OK: CP437 converter present"
-  strings "$LA" | grep -ioE "cp437|ibm437" | sort -u | tr '\n' ' '; echo
+# The reliable signal is the converter symbols GNU libiconv compiles CP437 to
+# (cp437_mbtowc / cp437_wctomb). Check the archive directly; fall back to
+# nm on the extracted iconv.o if the toolchain nm can't index the .a.
+have_cp437=0
+if $NM "$LA" 2>/dev/null | grep -qi "cp437_mbtowc"; then
+  have_cp437=1
 else
-  echo "!! CP437 still not in libiconv.a - the flag did not take. Check the configure output above."
+  tmpd="$(mktemp -d)"; ( cd "$tmpd" && "$AR" x "$LA" iconv.o 2>/dev/null ) || true
+  if [ -f "$tmpd/iconv.o" ] && $NM "$tmpd/iconv.o" 2>/dev/null | grep -qi "cp437_mbtowc"; then
+    have_cp437=1
+  elif [ -f "$tmpd/iconv.o" ] && strings "$tmpd/iconv.o" | grep -qx "csPC8CodePage437"; then
+    have_cp437=1   # unambiguous CP437-only alias string
+  fi
+  rm -rf "$tmpd"
+fi
+if [ "$have_cp437" = 1 ]; then
+  echo "    OK: CP437 converter present (cp437_mbtowc/cp437_wctomb)"
+else
+  echo "!! CP437 still not in libiconv.a."
+  echo "   Check that config.h has ENABLE_EXTRA:"
+  echo "     find ~/ps5-work/pacbrew-repo/libiconv -name config.h -path '*libiconv-1.17*' -exec grep -H ENABLE_EXTRA {} +"
+  echo "   If it shows '#undef ENABLE_EXTRA', re-run with: FORCE_EXTRA=1 bash scripts/21-rebuild-libiconv.sh"
   exit 1
 fi
 echo
