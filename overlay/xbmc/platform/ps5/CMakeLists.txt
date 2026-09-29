@@ -1,4 +1,5 @@
 set(SOURCES CPUInfoPS5.cpp
+            JitProbe.cpp
             GPUInfoPS5.cpp
             MemUtils.cpp
             PlatformPS5.cpp

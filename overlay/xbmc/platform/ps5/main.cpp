@@ -102,6 +102,8 @@ void Klog(const char* text)
 }
 
 void Klogf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+// Executable-memory probe (platform/ps5/JitProbe.cpp); gated by kodi-jitprobe.
+void XBMC_PS5_RunJitProbe();
 void Klogf(const char* fmt, ...)
 {
   char buf[512];
@@ -373,6 +375,16 @@ int main(int argc, char* argv[])
     const int n = RemoveTree("/download0/.kodi");
     unlink("/app0/kodi-reset");
     Klogf("[kodi-ps5] kodi-reset found: removed %d files and folders of /download0/.kodi\n", n);
+  }
+
+  // kodi-jitprobe: one-shot diagnostic. Tests whether this title can obtain
+  // executable memory (the prerequisite for an in-process binary-add-on
+  // loader) and logs the verdict over klog, then removes its own switch and
+  // continues starting Kodi normally. See platform/ps5/JitProbe.cpp.
+  if (SwitchPresent("/app0/kodi-jitprobe"))
+  {
+    XBMC_PS5_RunJitProbe();
+    unlink("/app0/kodi-jitprobe");
   }
 
   if (!std::getenv("HOME"))

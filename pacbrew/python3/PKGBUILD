@@ -55,13 +55,15 @@ prepare() {
 }
 
 build() {
-    # 1. The same Python for the build machine: it drives the cross build.
-    #    Built before the PS5 toolchain environment is sourced.
+    # 1. The same Python for the build machine: it only drives the cross build
+    #    (--with-build-python below), so it is built but NOT installed - its
+    #    in-tree ./python runs the stdlib straight from the source Lib/, which
+    #    is all --with-build-python needs. Skipping "make install" avoids the
+    #    host sharedinstall/compileall step, which is wasted work here and was
+    #    failing the build. Built before the PS5 toolchain env is sourced.
     mkdir -p build-host && cd build-host
-    ../Python-$pkgver/configure --prefix="$srcdir/hostpython" \
-        --without-ensurepip --disable-test-modules
+    ../Python-$pkgver/configure --without-ensurepip --disable-test-modules
     make
-    make install
     cd ..
 
     # 2. The PS5 library
@@ -70,7 +72,7 @@ build() {
     ../Python-$pkgver/configure --prefix="${PREFIX}" \
         --host=x86_64-pc-freebsd --build=x86_64-pc-linux-gnu \
         --disable-shared --without-ensurepip --without-pymalloc --disable-ipv6 \
-        --with-build-python="$srcdir/hostpython/bin/python3.14" \
+        --with-build-python="$srcdir/build-host/python" \
         --with-system-expat=yes --disable-test-modules \
         MODULE_BUILDTYPE=static "${_modules[@]}" "${_cache[@]}"
     make libpython3.14.a
@@ -90,11 +92,12 @@ package() {
         --exclude=ensurepip --exclude=__pycache__ -cf - .) |
         tar -xf - -C "${DESTDIR}${PREFIX}/lib/python3.14"
     cp "$(cat pybuilddir.txt)"/_sysconfigdata*.py "${DESTDIR}${PREFIX}/lib/python3.14/"
-    # Byte-compile the stdlib with the matching interpreter, hash-validated
-    # (PEP 552), so the .pyc stay valid after FTP uploads lose mtimes; /app0
-    # is read-only, so without them every import would try (and fail) to
-    # write __pycache__.
-    "$srcdir/hostpython/bin/python3.14" -m compileall -q -j0 \
+    # Byte-compile the stdlib, hash-validated (PEP 552), so the .pyc stay valid
+    # after FTP uploads lose mtimes; /app0 is read-only, so without them every
+    # import would try (and fail) to write __pycache__. The build-host
+    # interpreter is the same CPython 3.14.6, and .pyc bytecode is
+    # version-specific (no machine code), so its output loads on the console.
+    "$srcdir/build-host/python" -m compileall -q -j0 \
         --invalidation-mode checked-hash "${DESTDIR}${PREFIX}/lib/python3.14"
     install -Dm644 Misc/python.pc "${DESTDIR}${PREFIX}/lib/pkgconfig/python-3.14.pc"
     install -Dm644 Misc/python-embed.pc "${DESTDIR}${PREFIX}/lib/pkgconfig/python-3.14-embed.pc"
