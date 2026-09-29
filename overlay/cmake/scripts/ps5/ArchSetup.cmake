@@ -93,6 +93,10 @@ if(ENABLE_PYTHON)
     endif()
   endforeach()
   unset(_pylib)
+  # getentropy/explicit_bzero: referenced by libpython, absent from the SDK
+  # stubs; provided by shims/libkodishim (built by scripts/12). At the final
+  # eboot link libc_posix.o's getentropy takes precedence (object before archive).
+  list(APPEND SYSTEM_LDFLAGS -lkodishim)
 endif()
 
 list(APPEND AUDIO_BACKENDS_LIST "ps5")

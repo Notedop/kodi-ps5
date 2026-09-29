@@ -36,3 +36,10 @@ $CC -O2 -fPIC -c "$HERE/shims/libprocstat/procstat.c" -o "$BUILD/procstat.o"
 $AR rcs "$BUILD/libprocstat.a" "$BUILD/procstat.o"
 sudo install -m644 "$BUILD/libprocstat.a" "$DEST/lib/"
 echo "installed libprocstat stub into $DEST"
+
+# libkodishim: getentropy/explicit_bzero for the kodi.bin link (libpython
+# references them; the SDK stubs lack them). See shims/libkodishim/kodishim.c.
+$CC -O2 -fPIC -c "$HERE/shims/libkodishim/kodishim.c" -o "$BUILD/kodishim.o"
+$AR rcs "$BUILD/libkodishim.a" "$BUILD/kodishim.o"
+sudo install -m644 "$BUILD/libkodishim.a" "$DEST/lib/"
+echo "installed libkodishim into $DEST"
