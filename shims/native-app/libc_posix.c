@@ -965,3 +965,31 @@ char* realpath(const char* restrict path, char* restrict resolved)
   memcpy(resolved, out, o + 1);
   return resolved;
 }
+
+/*
+ * fopen(3) errno normalization. Python's frozen getpath (sys.path setup at
+ * interpreter start) probes for pyvenv.cfg with fopen() unconditionally and
+ * only tolerates FileNotFoundError/PermissionError, i.e. errno ENOENT or
+ * EACCES/EPERM; any other errno (left unset, 0, a Sony code) becomes a bare
+ * OSError that escapes and aborts init with "error evaluating path". The
+ * clean-room libc.prx's fopen does not reliably set a POSIX errno on failure.
+ * Linked with --wrap=fopen: call the real fopen, and if it fails derive errno
+ * from stat() (a real libkernel syscall): missing -> ENOENT, directory ->
+ * EISDIR, present-but-unopenable -> EACCES. Success is untouched.
+ */
+#include <stdio.h>
+FILE* __real_fopen(const char* restrict path, const char* restrict mode);
+FILE* __wrap_fopen(const char* restrict path, const char* restrict mode)
+{
+  FILE* f = __real_fopen(path, mode);
+  if (f || !path)
+    return f;
+  struct stat st;
+  if (stat(path, &st) != 0)
+    errno = (errno == ENOTDIR || errno == ENAMETOOLONG) ? errno : ENOENT;
+  else if (S_ISDIR(st.st_mode))
+    errno = EISDIR;
+  else
+    errno = EACCES;
+  return NULL;
+}
