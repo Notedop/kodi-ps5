@@ -62,6 +62,7 @@ _cache=(ac_cv_func_wait3=no ac_cv_func_wait4=no ac_cv_func_waitpid=no
         ac_cv_func_fork=no ac_cv_func_fork1=no ac_cv_func_vfork=no
         ac_cv_func_getentropy=yes
         ac_cv_func_pthread_getname_np=no ac_cv_func_pthread_get_name_np=no
+        ac_cv_func_pthread_setname_np=no ac_cv_func_pthread_set_name_np=no
         ac_cv_func_sched_setparam=no ac_cv_func_sched_setscheduler=no
         ac_cv_func_sched_get_priority_max=no ac_cv_func_sched_rr_get_interval=no
         ac_cv_func_sched_setaffinity=no
