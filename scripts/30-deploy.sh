@@ -81,6 +81,7 @@ cp "$HERE/shims/native-app/libc_locale.c" "$APP/src/"  # C-locale xlocale layer 
 cp "$HERE/shims/native-app/libc_net.c" "$APP/src/"     # getaddrinfo & co on Sony's resolver
 cp "$HERE/shims/native-app/thread_stack.c" "$APP/src/" # >= 1 MiB thread stacks (--wrap=pthread_create)
 cp "$HERE/shims/native-app/pipe_fallback.c" "$APP/src/" # pipe() via socketpair, fcntl F_SETFD as success (--wrap=pipe, --wrap=fcntl)
+cp "$HERE/shims/native-app/iconv_gnu.c" "$APP/src/"      # iconv via GNU libiconv: code pages for zip entry names (--wrap=iconv*)
 # libScePosixForWebKit is a browser-only system module: a title never gets it,
 # and everything imported from it stays at address 0 (first launch: isatty()).
 # Remove its link stub so nothing can bind to it; the shims above cover what
@@ -177,7 +178,7 @@ MAIN_O="$BUILD/CMakeFiles/kodi.dir/xbmc/platform/ps5/main.cpp.o"
 { echo "$MAIN_O"; cat "$APP/vendor/kodi-whole.txt"; } > "$APP/vendor/kodi-whole.rsp"
 LINK_SCRIPT="$APP/tools/build.sh"
 [ "$(grep -c -- '--wrap=malloc_usable_size \\$' "$LINK_SCRIPT")" = 1 ] || { echo "!! unexpected link line in $LINK_SCRIPT"; exit 1; }
-sed -i "/--wrap=malloc_usable_size \\\\$/a\\    --error-limit=0 --wrap=pthread_create --wrap=pipe --wrap=fcntl --whole-archive @$APP/vendor/kodi-whole.rsp --no-whole-archive \\\\" "$LINK_SCRIPT"
+sed -i "/--wrap=malloc_usable_size \\\\$/a\\    --error-limit=0 --wrap=pthread_create --wrap=pipe --wrap=fcntl --wrap=iconv_open --wrap=iconv --wrap=iconv_close --whole-archive @$APP/vendor/kodi-whole.rsp --no-whole-archive \\\\" "$LINK_SCRIPT"
 grep -q "kodi-whole.rsp" "$LINK_SCRIPT" || { echo "!! failed to inject the whole-archive list"; exit 1; }
 
 # External libraries as a linker GROUP (circular deps resolve inside a group),
@@ -248,6 +249,13 @@ else:
     p["gameIntent"] = {"permittedIntents": [{"intentType": "launchActivity"}]}
 lp = p.setdefault("localizedParameters", {"defaultLanguage": "en-US"})
 lp.setdefault("en-US", {})["titleName"] = "Kodi"
+# The save-data entry (Settings > Storage > Saved Data) inherits the title
+# name and icon0 above, so /download0 shows as "Kodi" with the Kodi icon. Make
+# that explicit so a data manager that reads its own field labels it clearly.
+sd = p.setdefault("saveDataInfo", {})
+sd["title"] = "Kodi"
+sd["subtitle"] = "Settings, add-ons and library"
+sd["detail"] = "Kodi configuration, installed add-ons and media library"
 json.dump(p, open(path, "w"), indent=2)
 print(f"    titleId {tid}, {category} app, downloadDataSize {p['downloadDataSize']} MiB")
 PY

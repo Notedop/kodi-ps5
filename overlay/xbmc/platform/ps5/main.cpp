@@ -356,41 +356,41 @@ int main(int argc, char* argv[])
   //   kodi-reset      wipe Kodi's data, then start Kodi fresh
   //   kodi-uninstall  wipe Kodi's data and quit; afterwards the whole title
   //                   folder can be deleted over FTP
+  // Kodi's data lives in its save data, /download0/.kodi (see the HOME choice
+  // below); these wipe that, not the read-only /app0 image.
   if (SwitchPresent("/app0/kodi-uninstall"))
   {
-    const int n = RemoveTree("/app0/kodi");
+    const int n = RemoveTree("/download0/.kodi");
     unlink("/app0/kodi-uninstall");
-    Klogf("[kodi-ps5] kodi-uninstall found: removed %d files and folders of /app0/kodi, "
+    Klogf("[kodi-ps5] kodi-uninstall found: removed %d files and folders of /download0/.kodi, "
           "quitting\n", n);
     _exit(0);
   }
   if (SwitchPresent("/app0/kodi-reset"))
   {
-    const int n = RemoveTree("/app0/kodi");
+    const int n = RemoveTree("/download0/.kodi");
     unlink("/app0/kodi-reset");
-    Klogf("[kodi-ps5] kodi-reset found: removed %d files and folders of /app0/kodi\n", n);
+    Klogf("[kodi-ps5] kodi-reset found: removed %d files and folders of /download0/.kodi\n", n);
   }
 
   if (!std::getenv("HOME"))
   {
-    // First location where directories, files and SQLite all work:
-    //  /data/kodi  preferred, but a sandboxed title normally cannot reach /data
-    //  /app0/kodi  the title folder itself = /data/homebrew/<TITLE_ID>/kodi on
-    //              disk (reachable over FTP), if the loader mounts it writable
-    //  /download0  the title's official writable data area (a disk image)
-    static const char* const candidates[] = {"/data/kodi", "/app0/kodi", "/download0"};
-    const char* chosen = nullptr;
-    for (const char* candidate : candidates)
-      if (ProbeHome(candidate))
-      {
-        chosen = candidate;
-        break;
-      }
-    if (!chosen)
-    {
-      Klog("[kodi-ps5] no writable home found; Kodi will fail to start\n");
-      chosen = "/download0";
-    }
+    // Kodi writes everything under $HOME/.kodi, and the only place a title may
+    // write is its own save-data area, /download0 (a private read-write image
+    // sized by downloadDataSize in sce_sys/param.json). /app0 is the read-only
+    // application image and is never a write target: some loaders leave it
+    // loosely mounted so small writes seem to work, but real writes (an add-on
+    // download) then hang, so it is not even a fallback. /data is the shared
+    // homebrew filesystem, reachable only after the jailbreak daemon opens the
+    // sandbox and useful for a development copy; it is opt-in through
+    // kodi-home-data rather than chosen silently, so the shipped title always
+    // keeps its state in its own save data.
+    const char* chosen = "/download0";
+    if (SwitchPresent("/app0/kodi-home-data") && ProbeHome("/data/kodi"))
+      chosen = "/data/kodi";
+    if (!ProbeHome(chosen))
+      Klogf("[kodi-ps5] %s is not writable; Kodi will fail to start (is downloadDataSize set in "
+            "param.json?)\n", chosen);
     Klogf("[kodi-ps5] HOME=%s\n", chosen);
     setenv("HOME", chosen, 1);
     // Python add-ons: the standard library ships in the title (Install.cmake)
@@ -402,6 +402,21 @@ int main(int argc, char* argv[])
       Klog("[kodi-ps5] PYTHONHOME=/app0/share/kodi/python\n");
     }
   }
+  // A marker in the save data, so the folder is identifiable as Kodi's on disk
+  // (over FTP) as well as in the console's data manager.
+  {
+    const std::string marker = std::string(std::getenv("HOME")) + "/sce_sys/keystone-note.txt";
+    MakeDirs(std::string(std::getenv("HOME")) + "/sce_sys");
+    const int fd = open(marker.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0)
+    {
+      const char* note = "Kodi for PlayStation 5 (PPSA99420) save data.\n";
+      const ssize_t n = write(fd, note, std::strlen(note));
+      (void)n;
+      close(fd);
+    }
+  }
+
   const std::string kodiData = std::string(std::getenv("HOME")) + "/.kodi";
   if (const int failed = OpenUpTree(kodiData)) // files left by earlier runs
     Klogf("[kodi-ps5] could not open up permissions of %d items in %s\n", failed,

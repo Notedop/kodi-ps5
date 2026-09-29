@@ -45,9 +45,13 @@ Ready-to-install builds are on the [releases page](https://github.com/VivaLaVent
 1. Extract the release zip into `/data/homebrew/` on the console over FTP; it
    creates `/data/homebrew/PPSA99420/`.
 2. Register the title with ShadowMountPlus, then start Kodi from the home screen.
-3. Add your media: *Videos → Files → Add videos… → Browse → Add network location…*,
-   protocol **Windows network (SMB)** or **NFS**, and enter the server's **IP
-   address** (Windows/NetBIOS names are not resolved). SMB2 and SMB3 work, SMB1 does not.
+3. Add your media under *Videos → Files → Add videos… → Browse*. Two local
+   entries appear on their own: **PS5 storage (FTP)**, the whole console
+   filesystem through the loader's FTP server (shown only while that server is
+   running), and each **USB drive** (see below). For network shares choose
+   **Add network location…**, protocol **Windows network (SMB)** or **NFS**,
+   and enter the server's **IP address** (Windows/NetBIOS names are not
+   resolved). SMB2 and SMB3 work, SMB1 does not.
 
 ### USB drives
 
@@ -61,8 +65,8 @@ start-up:
    jailbreak-on-demand is available.
 2. Plug in a drive formatted **exFAT** or **FAT32**.
 3. Start Kodi. The log reports `PS5 sandbox: opened by the jailbreak daemon`,
-   and the drive shows up as a source (*Videos → Files → Add videos… → Browse*,
-   under `/mnt/usb0` …, internal storage under `/data`).
+   and the drive appears under *Videos → Files → Add videos… → Browse* as
+   `/mnt/usb0` and so on.
 
 Without a daemon, Kodi runs as before with network sources only. The request is
 a file (`{"PID":"<pid>"}` in the title's `/download0/etahen_jailbreak`), which
@@ -106,6 +110,9 @@ folder itself (`/data/homebrew/PPSA99420/kodi`).
 - **Hardware decoding** of HEVC 4:2:2/4:4:4 and 12-bit video: FFmpeg decodes
   them, which is slow at high resolutions. H.264 High 10 is offered to the
   hardware decoder and falls back to FFmpeg if the decoder refuses it.
+- **Dolby Vision** is not mapped: a DV file's base layer plays but the picture
+  can look wrong or black, because the DV dynamic-metadata (RPU) is ignored.
+  Files that also carry an HDR10 or HLG layer are best set to play as HDR10.
 - **4K60 video** may stutter: the decoder runs at pipeline depth 1, which
   measured just short of a 60 fps frame at 4K. Deeper pipelines produced black
   pictures after every seek on this hardware, so depth 1 stays.
@@ -195,9 +202,10 @@ what gets fixed.
 
 | File | Effect |
 | --- | --- |
-| `kodi-reset` | wipe Kodi's data once, then start fresh |
-| `kodi-uninstall` | wipe Kodi's data and quit; the title folder can then be deleted over FTP |
+| `kodi-reset` | wipe Kodi's save data once, then start fresh |
+| `kodi-uninstall` | wipe Kodi's save data and quit |
 | `kodi-debug` | debug-level logging (slower; remove when done) |
+| `kodi-home-data` | *(development)* keep Kodi's data in `/data/kodi` instead of the save data, when the sandbox is open |
 
 ## Building
 

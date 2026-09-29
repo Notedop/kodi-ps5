@@ -74,8 +74,10 @@ endif()
 # -lprocstat: stub from shims/libprocstat (scripts/12); exiv2 references
 # libprocstat on any __FreeBSD__ target for its library-info dump.
 # libSceVideodec2: stub from scripts/17-build-sce-stubs.sh
+# -liconv: GNU libiconv (pacbrew), routed to by shims/native-app/iconv_gnu.c;
+# the console libc's iconv knows only the UTF encodings.
 set(SYSTEM_LDFLAGS -lSceAudioOut -lScePad -lSceUserService -lSceImeDialog -lSceRegMgr -lSceNetCtl -lSceSysmodule
-                   -lSceVideodec2 -lprocstat -lsmb2)
+                   -lSceVideodec2 -lprocstat -lsmb2 -liconv)
 
 # A static libpython needs the libraries its built-in modules use (Kodi's
 # FindPython adds them only for its own depends builds); each one that the

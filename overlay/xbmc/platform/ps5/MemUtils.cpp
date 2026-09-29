@@ -49,10 +49,15 @@ void GetMemoryStatus(MemoryStatus* buffer)
   // homebrew title is actually granted, so report physical memory when the
   // kernel answers and a conservative figure otherwise. Kodi only uses this
   // for the system-info screen and cache-size heuristics.
-  uint64_t physmem = 0;
-  size_t len = sizeof(physmem);
-  if (sysctlbyname("hw.physmem", &physmem, &len, nullptr, 0) != 0 || physmem == 0)
-    physmem = 5ULL * 1024 * 1024 * 1024;
+  // Asked once: Kodi's GUI polls this several times a second, and a refused
+  // sysctl ("hw.physmem is not approved") is logged by the kernel every time.
+  static uint64_t physmem = 0;
+  if (physmem == 0)
+  {
+    size_t len = sizeof(physmem);
+    if (sysctlbyname("hw.physmem", &physmem, &len, nullptr, 0) != 0 || physmem == 0)
+      physmem = 5ULL * 1024 * 1024 * 1024;
+  }
 
   buffer->totalPhys = physmem;
   buffer->availPhys = physmem / 2; // TODO: derive from the process' actual allocation

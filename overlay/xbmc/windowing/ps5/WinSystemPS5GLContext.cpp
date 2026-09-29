@@ -246,7 +246,19 @@ float CWinSystemPS5GLContext::GetFrameLatencyAdjustment()
 bool CWinSystemPS5GLContext::BeginRender()
 {
   if (m_stats)
-    m_frameStart = std::chrono::steady_clock::now();
+  {
+    // kodi-debug: the GUI thread was away from rendering for a while - the
+    // log lines just before this one show what it was doing
+    const auto now = std::chrono::steady_clock::now();
+    if (m_frameStart.time_since_epoch().count() != 0)
+    {
+      const double sinceLast = std::chrono::duration<double, std::milli>(now - m_frameStart).count();
+      if (sinceLast > 500.0)
+        CLog::Log(LOGWARNING, "PS5 presentation (kodi-debug): GUI thread stalled for {:.0f} ms",
+                  sinceLast);
+    }
+    m_frameStart = now;
+  }
   const bool ok = CRenderSystemGL::BeginRender();
   m_hdr.BindTarget(m_nWidth, m_nHeight); // HDR: the frame renders into the 10-bit target
   return ok;
