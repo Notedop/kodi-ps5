@@ -15,3 +15,4 @@
 0015-native-keyboard-ps5.patch
 0016-curl-idle-close-off-thread-ps5.patch
 0017-ps5-binary-addon-inprocess-loader.patch
+0018-xbpython-report-init-failure-ps5.patch
