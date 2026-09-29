@@ -32,7 +32,7 @@ _modules=(py_cv_module_grp=n/a py_cv_module_syslog=n/a py_cv_module__dbm=n/a
           py_cv_module_xxsubtype=n/a py_cv_module__xxsubinterpreters=n/a
           py_cv_module__tkinter=n/a py_cv_module__codecs_jp=n/a
           py_cv_module__codecs_kr=n/a py_cv_module__codecs_tw=n/a
-          py_cv_module__decimal=n/a py_cv_module__sha2=n/a py_cv_module__zstd=n/a
+          py_cv_module__decimal=n/a py_cv_module__zstd=n/a
           py_cv_module__posixsubprocess=n/a py_cv_module__posixshmem=n/a
           py_cv_module__multiprocessing=n/a py_cv_module__ctypes=n/a)
 
@@ -42,8 +42,19 @@ _modules=(py_cv_module_grp=n/a py_cv_module_syslog=n/a py_cv_module__dbm=n/a
 # the SDK but declared nowhere; it only names threads in crash dumps, so it
 # is disabled rather than declared (declaring it would need <pthread.h> in
 # the force-included header, which breaks configure's function probes).
+# The OpenSSL ssl/hashlib checks link libssl+libcrypto standalone; libcrypto
+# references getentropy, which only Kodi's shim provides at Kodi link, so the
+# standalone test fails although OpenSSL 3.5.2 works (the network self-test
+# proves it). Their verdicts are forced to yes so _ssl and _hashlib are built
+# into libpython; their references resolve at Kodi link like all the rest.
+# _sha2 stays enabled (not in the n/a list) as hashlib's SHA-2 fallback.
+# sched.h is disabled, so every sched_* function check is disabled with it:
+# posixmodule defines sched_param_desc & co only under HAVE_SCHED_H but
+# references them under HAVE_SCHED_SETPARAM/SETSCHEDULER (incl. module init),
+# so header-off + functions-on is an inconsistent build. Scheduler control
+# is meaningless in a title anyway. (fexecve, not fexecv, is the real key.)
 _cache=(ac_cv_func_wait3=no ac_cv_func_wait4=no ac_cv_func_waitpid=no
-        ac_cv_func_execv=no ac_cv_func_fexecv=no ac_cv_func_setpriority=no
+        ac_cv_func_execv=no ac_cv_func_fexecve=no ac_cv_func_setpriority=no
         ac_cv_func_sendfile=no ac_cv_header_sched_h=no
         ac_cv_func_posix_spawn=no ac_cv_func_posix_spawnp=no
         ac_cv_func_forkpty=no ac_cv_lib_util_forkpty=no ac_cv_func_getgroups=no
@@ -51,6 +62,10 @@ _cache=(ac_cv_func_wait3=no ac_cv_func_wait4=no ac_cv_func_waitpid=no
         ac_cv_func_fork=no ac_cv_func_fork1=no ac_cv_func_vfork=no
         ac_cv_func_getentropy=yes
         ac_cv_func_pthread_getname_np=no ac_cv_func_pthread_get_name_np=no
+        ac_cv_func_sched_setparam=no ac_cv_func_sched_setscheduler=no
+        ac_cv_func_sched_get_priority_max=no ac_cv_func_sched_rr_get_interval=no
+        ac_cv_func_sched_setaffinity=no
+        ac_cv_working_openssl_ssl=yes ac_cv_working_openssl_hashlib=yes
         ac_cv_file__dev_ptmx=no ac_cv_file__dev_ptc=no)
 
 prepare() {
@@ -84,6 +99,7 @@ build() {
         --disable-shared --without-ensurepip --without-pymalloc --disable-ipv6 \
         --with-build-python="$srcdir/build-host/python" \
         --with-system-expat=yes --disable-test-modules \
+        --with-openssl="${PS5_SYSROOT}${PS5_HBROOT}" \
         MODULE_BUILDTYPE=static "${_modules[@]}" "${_cache[@]}"
     make libpython3.14.a
     make pybuilddir.txt   # the target's _sysconfigdata
