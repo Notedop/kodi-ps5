@@ -108,3 +108,19 @@ char* __dlerror(void)
   g_dl_tried = 0;
   return (char*)"dynamic loading is not available in this PS5 title";
 }
+
+/*
+ * C++ thread_local init functions (_ZTH<mangled-name>): the compiler references
+ * them weakly from every TU that touches a thread_local, and they resolve to
+ * null when the variable has no dynamic initializer (the defining TU emits
+ * nothing). The native-app converter rejects any undefined symbol, weak or
+ * not, so give them a no-op body: the TLS wrapper calls it, nothing happens,
+ * the variable keeps its static (zero) initialization - which is correct
+ * precisely because no dynamic init exists.
+ *
+ *   XBMCAddon::xbmcgui::InterceptorBase::upcallTls  (a plain thread_local
+ *   pointer in xbmc/interfaces/legacy/Window.cpp; Python GUI bindings)
+ */
+void _ZTHN9XBMCAddon7xbmcgui15InterceptorBase9upcallTlsE(void)
+{
+}
