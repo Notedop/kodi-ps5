@@ -349,10 +349,21 @@ void CWinSystemPS5GLContext::PresentRender(bool rendered, bool videoLayer)
     }
 
     // eglSwapBuffers is our only vertical-sync source.
+    const auto beforeSwap = m_stats ? std::chrono::steady_clock::now()
+                                    : std::chrono::steady_clock::time_point{};
     if (!m_eglContext.TrySwapBuffers())
     {
       CEGLUtils::Log(LOGERROR, "eglSwapBuffers failed");
       throw std::runtime_error("eglSwapBuffers failed");
+    }
+    if (m_stats && beforeSwap.time_since_epoch().count() != 0)
+    {
+      const double swapMs =
+          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - beforeSwap)
+              .count();
+      if (swapMs > 500.0)
+        CLog::Log(LOGWARNING, "PS5 presentation (kodi-debug): eglSwapBuffers blocked for {:.0f} ms",
+                  swapMs);
     }
     if (m_stats) // kodi-debug: what reaches the display, and what a frame costs
     {

@@ -15,6 +15,7 @@
 #include <sys/select.h>
 #include <fcntl.h>
 #include <arpa/inet.h>
+#include <unistd.h>
 
 #include "MediaSource.h"
 
