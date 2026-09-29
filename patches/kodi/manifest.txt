@@ -18,3 +18,4 @@
 0018-xbpython-report-init-failure-ps5.patch
 0019-curl-multi-wait-ps5.patch
 0020-curl-timing-diagnostic-ps5.patch
+0021-install-timing-diagnostic-ps5.patch
