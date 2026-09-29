@@ -9,6 +9,7 @@ set(SOURCES CPUInfoPS5.cpp
             strptime.cpp)
 
 set(HEADERS CPUInfoPS5.h
+            JitProbe.h
             GPUInfoPS5.h
             PlatformPS5.h
             PS5InterfaceForCLog.h

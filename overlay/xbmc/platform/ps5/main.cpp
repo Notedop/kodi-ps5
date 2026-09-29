@@ -8,6 +8,7 @@
 
 #include "application/AppEnvironment.h"
 #include "platform/ps5/BuildStamp.h"
+#include "platform/ps5/JitProbe.h"
 #include "application/AppParamParser.h"
 #include "application/AppParams.h"
 #include "platform/xbmc.h"
@@ -102,8 +103,6 @@ void Klog(const char* text)
 }
 
 void Klogf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-// Executable-memory probe (platform/ps5/JitProbe.cpp); gated by kodi-jitprobe.
-void XBMC_PS5_RunJitProbe();
 void Klogf(const char* fmt, ...)
 {
   char buf[512];

@@ -22,6 +22,8 @@
  *  of failing the link.
  */
 
+#include <cstdarg>
+#include <cstdio>
 #include <csetjmp>
 #include <csignal>
 #include <cstdint>
@@ -30,9 +32,30 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-// Provided by main.cpp.
-void Klog(const char* text);
+#include "platform/ps5/JitProbe.h"
+
+// Log straight to klog, exactly as main.cpp's markers do. Self-contained so
+// this file has no cross-TU link dependency (main.cpp's Klog has internal
+// linkage). sceKernelDebugOutText is the title's only reliable early sink.
+extern "C" void sceKernelDebugOutText(int channel, const char* text);
+
+namespace
+{
+void Klog(const char* text)
+{
+  sceKernelDebugOutText(0, text);
+}
 void Klogf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void Klogf(const char* fmt, ...)
+{
+  char buf[512];
+  va_list ap;
+  va_start(ap, fmt);
+  std::vsnprintf(buf, sizeof buf, fmt, ap);
+  va_end(ap);
+  Klog(buf);
+}
+} // namespace
 
 // Sce JIT API. Signatures per the PS5 homebrew SDK; declared weak so an
 // absent symbol leaves the pointer null rather than breaking the link.
