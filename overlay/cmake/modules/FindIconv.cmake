@@ -31,7 +31,11 @@ if(NOT TARGET ${APP_NAME_LC}::${CMAKE_FIND_PACKAGE_NAME})
     # is built into libc (Iconv_IS_BUILT_IN) and links neither the library nor
     # its header. Force the discovery path instead: GNU libiconv's own
     # <iconv.h> then renames iconv_open -> libiconv_open, which resolves in
-    # libiconv.a rather than at address 0. No shim, no interposition.
+    # libiconv.a rather than at address 0. No shim, no interposition. NOTE:
+    # pacbrew's libiconv must be built with --enable-extra-encodings
+    # (scripts/21-rebuild-libiconv.sh), or it links fine but has no CP437
+    # converter and iconv_open("UTF-8","CP437") still fails at run time - the
+    # add-on-zip case this whole path exists for.
     set(Iconv_IS_BUILT_IN OFF CACHE BOOL "iconv is not in the PS5 libc" FORCE)
   endif()
 

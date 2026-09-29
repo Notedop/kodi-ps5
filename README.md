@@ -233,6 +233,7 @@ git clone https://github.com/xbmc/xbmc.git ~/kodi
 # 2. Host tools and the libraries nobody packages
 bash scripts/10-build-host-tools.sh      # TexturePacker + JsonSchemaBuilder, native
 bash scripts/11-build-tinyxml.sh         # TinyXML 2.6.2 into the sysroot
+bash scripts/21-rebuild-libiconv.sh    # add CP437 to pacbrew libiconv (extra encodings); needed for add-on zips
 bash scripts/12-build-libuuid-shim.sh    # small libuuid (crossguid) + libprocstat stub (exiv2)
 bash scripts/13-build-brotli.sh          # brotli for Kodi's internal exiv2
 bash scripts/14-sysroot-pc-files.sh      # .pc files pacbrew does not install (sqlite3)
