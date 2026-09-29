@@ -37,7 +37,11 @@ _modules=(py_cv_module_grp=n/a py_cv_module_syslog=n/a py_cv_module__dbm=n/a
           py_cv_module__multiprocessing=n/a py_cv_module__ctypes=n/a)
 
 # No processes (Kodi's tvOS list). getentropy() is provided by Kodi's C
-# library shims (kern.arandom), which configure cannot see in the sysroot.
+# library shims (kern.arandom), which configure cannot see in the sysroot;
+# its prototype comes from ps5_compat.h. pthread_getname_np is exported by
+# the SDK but declared nowhere; it only names threads in crash dumps, so it
+# is disabled rather than declared (declaring it would need <pthread.h> in
+# the force-included header, which breaks configure's function probes).
 _cache=(ac_cv_func_wait3=no ac_cv_func_wait4=no ac_cv_func_waitpid=no
         ac_cv_func_execv=no ac_cv_func_fexecv=no ac_cv_func_setpriority=no
         ac_cv_func_sendfile=no ac_cv_header_sched_h=no
@@ -46,6 +50,7 @@ _cache=(ac_cv_func_wait3=no ac_cv_func_wait4=no ac_cv_func_waitpid=no
         ac_cv_func_system=no ac_cv_func_dup3=no ac_cv_func_pipe2=no
         ac_cv_func_fork=no ac_cv_func_fork1=no ac_cv_func_vfork=no
         ac_cv_func_getentropy=yes
+        ac_cv_func_pthread_getname_np=no ac_cv_func_pthread_get_name_np=no
         ac_cv_file__dev_ptmx=no ac_cv_file__dev_ptc=no)
 
 prepare() {

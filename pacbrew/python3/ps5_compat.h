@@ -1,31 +1,31 @@
 /*
- * Prototypes for functions that exist on the PS5 target but that the SDK's
- * headers do not declare. Python's configure links against them (their
- * symbols are present), so it defines HAVE_* for them - but the call sites
- * then trip -Werror=implicit-function-declaration. Force-included into every
- * cross-compiled translation unit (CPPFLAGS -include), never into the host
- * build.
+ * Prototype for getentropy(), which the PS5 target provides (Kodi's C library
+ * shim, shims/native-app/libc_posix.c, via kern.arandom) but the SDK's headers
+ * do not declare. Python's configure is told it exists
+ * (ac_cv_func_getentropy=yes), and it is load-bearing: Python's hash-seed
+ * randomization calls it at interpreter startup, and without a working entropy
+ * source Python fails to initialize. The call site then needs a prototype or
+ * -Werror=implicit-function-declaration rejects it.
  *
- *  getentropy         - provided by Kodi's C library shim
- *                       (shims/native-app/libc_posix.c, kern.arandom), which
- *                       configure is told about via ac_cv_func_getentropy=yes.
- *                       Load-bearing: Python's hash-seed randomization calls
- *                       it at interpreter startup; without a working entropy
- *                       source Python fails to initialize.
- *  pthread_getname_np - exported by the SDK's libkernel stubs; used by
- *                       traceback.c to name threads in dumps.
+ * This header is force-included (CPPFLAGS -include) into every cross-compiled
+ * translation unit, INCLUDING configure's own feature tests - so it must pull
+ * in NO system headers. Autoconf probes functions by declaring a bogus
+ * `char func();` prototype; a real prototype seen first (e.g. clock_gettime
+ * via <pthread.h> -> <time.h>) makes that probe fail to compile, and configure
+ * wrongly concludes the function is absent. That is exactly what broke
+ * HAVE_CLOCK_GETTIME on a previous attempt. Hence __SIZE_TYPE__ (a compiler
+ * builtin) instead of <stddef.h>, and no other includes at all.
+ *
+ * Only getentropy is declared here. Its own configure probe is skipped by the
+ * cache entry, so this prototype cannot conflict with any test.
  */
 #pragma once
-
-#include <stddef.h>
-#include <pthread.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-int getentropy(void* buf, size_t buflen);
-int pthread_getname_np(pthread_t thread, char* name, size_t len);
+int getentropy(void* buf, __SIZE_TYPE__ buflen);
 
 #ifdef __cplusplus
 }
