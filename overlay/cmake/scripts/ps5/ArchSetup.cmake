@@ -74,9 +74,11 @@ endif()
 # -lprocstat: stub from shims/libprocstat (scripts/12); exiv2 references
 # libprocstat on any __FreeBSD__ target for its library-info dump.
 # libSceVideodec2: stub from scripts/17-build-sce-stubs.sh
-# iconv: the system libc's (Unicode encodings only). CP437, which the zip
-# reader needs for entry names, comes from shims/native-app/iconv_gnu.c,
-# linked with --wrap by scripts/30-deploy.sh; no iconv library is linked.
+# iconv: pacbrew's GNU libiconv (Find module forced on for ps5 in
+# cmake/modules/FindIconv.cmake). Its <iconv.h> renames iconv_open ->
+# libiconv_open, so Kodi's calls resolve in libiconv.a instead of binding to
+# the console libc's Unicode-only iconv at run time. -liconv is added by the
+# Iconv::Iconv target Kodi links; it need not be repeated here.
 set(SYSTEM_LDFLAGS -lSceAudioOut -lScePad -lSceUserService -lSceImeDialog -lSceRegMgr -lSceNetCtl -lSceSysmodule
                    -lSceVideodec2 -lprocstat -lsmb2)
 

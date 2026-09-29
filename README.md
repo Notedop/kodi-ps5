@@ -295,7 +295,7 @@ title/sce_sys/                  Kodi's icon
 | Input | `PS5PadInput`: DualSense polled at 125 Hz, mapped to Kodi keyboard events |
 | Network sources | `smb://` on libsmb2, NFS on libnfs, UPnP |
 | Logging | every log line goes to klog (`PS5InterfaceForCLog`) as well as `kodi.log` |
-| C library gaps | `shims/native-app/`: resolver (`getaddrinfo` on `sceNetResolver`), locale, directory reading, time, 8 MiB thread stacks, direct-memory heap, CP437 for `iconv` (zip entry names; the system iconv knows only the Unicode encodings) |
+| C library gaps | `shims/native-app/`: resolver (`getaddrinfo` on `sceNetResolver`), locale, directory reading, time, 8 MiB thread stacks, direct-memory heap |
 | Packaging | ps5-opengl's native-app template: `eboot.bin` + `sce_module/` + `sce_sys/` + Kodi's data in `share/` |
 </details>
 
