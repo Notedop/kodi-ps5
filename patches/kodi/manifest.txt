@@ -14,3 +14,4 @@
 0014-hlg-to-pq-shader-ps5.patch
 0015-native-keyboard-ps5.patch
 0016-curl-idle-close-off-thread-ps5.patch
+0017-ps5-binary-addon-inprocess-loader.patch
