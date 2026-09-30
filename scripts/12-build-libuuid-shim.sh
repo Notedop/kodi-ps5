@@ -43,5 +43,5 @@ $CC -O2 -fPIC -c "$HERE/shims/libkodishim/kodishim.c" -o "$BUILD/kodishim.o"
 $CC -O2 -fPIC -c "$HERE/shims/native-app/libc_socket.c" -o "$BUILD/libc_socket.o"
 $AR rcs "$BUILD/libkodishim.a" "$BUILD/kodishim.o" "$BUILD/libc_socket.o"
 sudo install -m644 "$BUILD/libkodishim.a" "$DEST/lib/"
-. "$HERE/lib/sysroot-changed.sh"; sysroot_changed
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sysroot-changed.sh"; sysroot_changed
 echo "installed libkodishim into $DEST"

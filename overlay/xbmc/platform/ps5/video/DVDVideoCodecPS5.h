@@ -10,6 +10,7 @@
 
 #include "VideoBufferPS5.h"
 #include "VideoDec2.h"
+#include "cores/VideoPlayer/DVDCodecs/DVDCodecs.h" // CDVDCodecOptions (stored for the software fallback)
 #include "cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h"
 #include "cores/VideoPlayer/DVDStreamInfo.h"
 
