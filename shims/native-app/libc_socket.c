@@ -12,6 +12,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/types.h>
+#include <sys/filio.h>   /* FIONBIO */
+#include <stdarg.h>
 
 typedef struct SceNetSockaddr
 {
@@ -207,4 +209,29 @@ int ps5_getpeername(int s, struct sockaddr* name, unsigned int* len)
 int ps5_shutdown(int s, int how)
 {
   return sceNetShutdown(s, how) < 0 ? sce_fail() : 0;
+}
+
+/* Python sets a socket non-blocking with ioctl(fd, FIONBIO, &on) - a raw
+ * libkernel syscall the sandbox denies (EACCES), and the one call between
+ * socket() and connect() our redirect did not cover, which is why connect()
+ * was never reached. sceNet exposes non-blocking as a socket option:
+ * setsockopt(SOL_SOCKET=0xffff, SCE_NET_SO_NBIO=0x1200, int). Route FIONBIO
+ * to that; any other ioctl on a socket is unsupported here (ENOTTY). */
+#define SCE_NET_SOL_SOCKET 0xffff
+#define SCE_NET_SO_NBIO    0x1200
+int ps5_ioctl(int fd, unsigned long req, ...)
+{
+  va_list ap;
+  va_start(ap, req);
+  void* arg = va_arg(ap, void*);
+  va_end(ap);
+  if (req == FIONBIO)
+  {
+    int on = arg ? (*(int*)arg ? 1 : 0) : 0;
+    if (sceNetSetsockopt(fd, SCE_NET_SOL_SOCKET, SCE_NET_SO_NBIO, &on, (int)sizeof on) < 0)
+      return sce_fail_tagged("ioctl-nbio");
+    return 0;
+  }
+  errno = ENOTTY;
+  return -1;
 }

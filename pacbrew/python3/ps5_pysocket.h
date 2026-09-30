@@ -34,6 +34,7 @@ int ps5_getsockname(int s, struct sockaddr* name, unsigned int* len);
 int ps5_getpeername(int s, struct sockaddr* name, unsigned int* len);
 int ps5_shutdown(int s, int how);
 int ps5_close(int fd);
+int ps5_ioctl(int fd, unsigned long req, ...);
 
 #define socket      ps5_socket
 #define connect     ps5_connect
@@ -49,5 +50,6 @@ int ps5_close(int fd);
 #define getpeername ps5_getpeername
 #define shutdown    ps5_shutdown
 #define SOCKETCLOSE ps5_close
+#define ioctl       ps5_ioctl
 
 #endif /* PS5_PYSOCKET */
