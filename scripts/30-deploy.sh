@@ -82,7 +82,7 @@ cp "$HERE/shims/native-app/libc_net.c" "$APP/src/"     # getaddrinfo & co on Son
 cp "$HERE/shims/native-app/thread_stack.c" "$APP/src/" # >= 1 MiB thread stacks (--wrap=pthread_create)
 cp "$HERE/shims/native-app/pipe_fallback.c" "$APP/src/" # pipe() via socketpair, fcntl F_SETFD as success (--wrap=pipe, --wrap=fcntl)
 cp "$HERE/shims/native-app/stdio_tee.c" "$APP/src/"    # fd 1/2 -> klog (--wrap=write): Python fatal init errors, aborts
-cp "$HERE/shims/native-app/libc_socket.c" "$APP/src/"  # BSD sockets via libSceNet (Python outbound; sandbox denies raw socket())
+cp "$HERE/shims/native-app/libc_socket.c" "$APP/src/"  # ps5_* socket funcs (libSceNet) for Python's socket module only
 # libScePosixForWebKit is a browser-only system module: a title never gets it,
 # and everything imported from it stays at address 0 (first launch: isatty()).
 # Remove its link stub so nothing can bind to it; the shims above cover what
@@ -179,7 +179,7 @@ MAIN_O="$BUILD/CMakeFiles/kodi.dir/xbmc/platform/ps5/main.cpp.o"
 { echo "$MAIN_O"; cat "$APP/vendor/kodi-whole.txt"; } > "$APP/vendor/kodi-whole.rsp"
 LINK_SCRIPT="$APP/tools/build.sh"
 [ "$(grep -c -- '--wrap=malloc_usable_size \\$' "$LINK_SCRIPT")" = 1 ] || { echo "!! unexpected link line in $LINK_SCRIPT"; exit 1; }
-sed -i "/--wrap=malloc_usable_size \\\\$/a\\    --error-limit=0 --wrap=pthread_create --wrap=pipe --wrap=fcntl --wrap=chdir --wrap=write --wrap=fopen --wrap=socket --wrap=connect --wrap=bind --wrap=listen --wrap=send --wrap=recv --wrap=sendto --wrap=recvfrom --wrap=setsockopt --wrap=getsockopt --wrap=getsockname --wrap=getpeername --wrap=shutdown --wrap=close --whole-archive @$APP/vendor/kodi-whole.rsp --no-whole-archive \\\\" "$LINK_SCRIPT"
+sed -i "/--wrap=malloc_usable_size \\\\$/a\\    --error-limit=0 --wrap=pthread_create --wrap=pipe --wrap=fcntl --wrap=chdir --wrap=write --wrap=fopen --whole-archive @$APP/vendor/kodi-whole.rsp --no-whole-archive \\\\" "$LINK_SCRIPT"
 grep -q "kodi-whole.rsp" "$LINK_SCRIPT" || { echo "!! failed to inject the whole-archive list"; exit 1; }
 
 # External libraries as a linker GROUP (circular deps resolve inside a group),
