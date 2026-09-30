@@ -8,6 +8,8 @@
 
 #include "DVDVideoCodecPS5.h"
 
+#include "cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodecFFmpeg.h"
+
 #include "RendererPS5.h"
 
 #include "VideoCodecRegistration.h"
@@ -156,7 +158,8 @@ bool CDVDVideoCodecPS5::Open(CDVDStreamInfo& hints, CDVDCodecOptions& options)
   m_streamDecodes = 0;
   m_streamDecodeMs = m_streamMaxMs = 0.0;
   m_streamOverBudget = 0;
-  if (!m_decoder->Open(codec, hints.width, hints.height, error, interlaced))
+  m_options = options;
+  if (!m_decoder->Open(codec, hints.width, hints.height, error, interlaced, hints.level))
   {
     CLog::Log(LOGWARNING, "CDVDVideoCodecPS5: hardware decoder unavailable ({}), using FFmpeg",
               error);
@@ -370,6 +373,8 @@ bool CDVDVideoCodecPS5::SetupBitstreamFilter(const CDVDStreamInfo& hints)
 
 bool CDVDVideoCodecPS5::AddData(const DemuxPacket& packet)
 {
+  if (m_software)
+    return m_software->AddData(packet);
   if (m_fatal)
     return false;
   if (!packet.pData || packet.iSize <= 0)
@@ -480,6 +485,10 @@ bool CDVDVideoCodecPS5::HevcAccessUnitIsRasl(const uint8_t* data, size_t size)
 
 bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
 {
+  // switched to software mid-packet (the bitstream-filter loop may still hold
+  // access units): the hardware decoder is closed, drop the rest
+  if (m_software)
+    return true;
   if (m_hevc && m_skipRasl)
   {
     if (HevcAccessUnitIsRasl(data, size))
@@ -517,6 +526,10 @@ bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
     {
       CLog::Log(LOGERROR, "CDVDVideoCodecPS5: {} decode errors in a row, giving up",
                 m_errorsInRow);
+      // Nothing shown yet: the hardware refused this stream outright. Continue
+      // in software rather than leaving the player waiting for a first frame.
+      if (m_picturesOut == 0 && m_decoded.empty() && SwitchToSoftware())
+        return false; // this access unit is dropped; FFmpeg resyncs on the next keyframe
       m_fatal = true;
     }
     return false;
@@ -896,6 +909,11 @@ void CDVDVideoCodecPS5::ClearQueue()
 
 void CDVDVideoCodecPS5::Reset()
 {
+  if (m_software)
+  {
+    m_software->Reset();
+    return;
+  }
   ClearQueue();
   m_pts.clear();
   m_skipRasl = m_hevc;
@@ -924,6 +942,8 @@ void CDVDVideoCodecPS5::Reset()
 
 CDVDVideoCodec::VCReturn CDVDVideoCodecPS5::GetPicture(VideoPicture* pVideoPicture)
 {
+  if (m_software)
+    return m_software->GetPicture(pVideoPicture);
   if (m_fatal)
     return VC_ERROR;
 
@@ -940,6 +960,7 @@ CDVDVideoCodec::VCReturn CDVDVideoCodecPS5::GetPicture(VideoPicture* pVideoPictu
 
   Decoded d = m_decoded.front();
   m_decoded.pop_front();
+  ++m_picturesOut;
 
   pVideoPicture->Reset(); // releases the previous picture's buffer
   pVideoPicture->videoBuffer = d.buffer;
@@ -976,4 +997,26 @@ void KODI::PLATFORM::PS5::RegisterVideoCodecs()
   CDVDVideoCodecPS5::Register();
   // the zero-copy renderer takes only the decoder's own frames (kodi-zerocopy)
   CRendererPS5::Register();
+}
+
+bool CDVDVideoCodecPS5::SwitchToSoftware()
+{
+  auto software = std::make_unique<CDVDVideoCodecFFmpeg>(m_processInfo);
+  CDVDStreamInfo hints = m_hints; // the stream's original hints and extradata
+  hints.codecOptions |= CODEC_FORCE_SOFTWARE;
+  CDVDCodecOptions options = m_options;
+  if (!software->Open(hints, options))
+  {
+    CLog::Log(LOGERROR, "CDVDVideoCodecPS5: software fallback could not open the stream");
+    return false;
+  }
+  CLog::Log(LOGWARNING, "CDVDVideoCodecPS5: the hardware decoder refused {} before its first "
+            "picture; continuing with software decoding ({})",
+            m_streamName, software->GetName());
+  // nothing of the hardware decoder was ever shown, so it can go now
+  m_pendingAus.clear();
+  m_pts.clear();
+  m_decoder->Close();
+  m_software = std::move(software);
+  return true;
 }

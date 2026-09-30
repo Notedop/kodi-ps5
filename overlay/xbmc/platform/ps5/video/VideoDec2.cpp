@@ -8,6 +8,7 @@
 
 #include "VideoDec2.h"
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -100,6 +101,7 @@ int32_t sceVideodec2Reset(void* decoder);
 int32_t sceSysmoduleLoadModule(uint32_t id);
 
 int64_t sceKernelGetDirectMemorySize(void);
+int sceKernelAvailableFlexibleMemorySize(size_t* size);
 int sceKernelAllocateDirectMemory(int64_t searchStart, int64_t searchEnd, size_t length,
                                   size_t alignment, int memoryType, int64_t* start);
 int sceKernelMapDirectMemory(void** address, size_t length, int protection, int flags,
@@ -212,7 +214,7 @@ int32_t CVideoDec2::LoadModule()
 }
 
 bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& error,
-                     bool interlaced)
+                     bool interlaced, int streamLevel)
 {
   Close();
   const bool uhd = width > 1920 || height > 1088;
@@ -290,9 +292,28 @@ bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& 
   config.cpuPriority = 700;
   config.optimizeProgressive = interlaced ? 0 : 1; // interlaced: probe (kodi-hw-interlaced)
 
+  // The default maximum level (HEVC 4.1 / H.264 5.1 at 1080p) covers most
+  // files, but encodes tagged higher (e.g. 1080p HEVC at level 5.0/5.1) were
+  // configured too low and every access unit was refused (0x811d0303), with
+  // no picture ever produced. Raise the level to the stream's own when it is
+  // above the default; if the decoder refuses that configuration, fall back
+  // to exactly the default one below, so streams that work are unaffected.
+  const uint32_t defaultLevel = config.maxLevel;
+  if (!vp9 && streamLevel > 0 && static_cast<uint32_t>(streamLevel) > defaultLevel)
+    config.maxLevel = std::min<uint32_t>(static_cast<uint32_t>(streamLevel), h264 ? 52u : 156u);
+
   sceVideodec2DecoderMemory memory{};
   memory.size = sizeof(memory);
   rc = sceVideodec2QueryDecoderMemoryInfo(&config, &memory);
+  if (rc != 0 && !vp9 && config.maxLevel != defaultLevel)
+  {
+    Log("[kodi-ps5] videodec2: level %u refused (0x%x), using the default level %u\n",
+        config.maxLevel, static_cast<unsigned>(rc), defaultLevel);
+    config.maxLevel = defaultLevel;
+    memory = {};
+    memory.size = sizeof(memory);
+    rc = sceVideodec2QueryDecoderMemoryInfo(&config, &memory);
+  }
   if (rc != 0 && vp9)
   {
     // VP9's level numbering and reference-frame budget are not documented:
@@ -323,7 +344,8 @@ bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& 
   if (vp9)
     Log("[kodi-ps5] videodec2: VP9 profile %u accepted with level %u, %d reference frames\n",
         config.profile, config.maxLevel, config.maxDpbFrames);
-  Log("[kodi-ps5] videodec2: pipeline depth %d\n", config.pipelineDepth);
+  Log("[kodi-ps5] videodec2: pipeline depth %d, level %u (stream level %d)\n", config.pipelineDepth,
+      config.maxLevel, streamLevel);
   Log("[kodi-ps5] videodec2: %s %dx%d needs cpu=%llx gpu=%llx shared=%llx frame=%llx\n",
       h264 ? (m_tenBit ? "H.264 High 10" : "H.264")
            : (vp9 ? (m_tenBit ? "VP9 Profile 2" : "VP9") : (m_tenBit ? "HEVC Main10" : "HEVC")),
@@ -341,8 +363,26 @@ bool CVideoDec2::Open(VideoDec2Codec codec, int width, int height, std::string& 
     if (rc != 0)
     {
       m_cpuWorkspace = nullptr;
-      error = Hex("mapping the decoder's CPU workspace", rc);
-      return false;
+      /* A title has only ~448 MiB of flexible memory, and every thread stack
+         (8 MiB minimum, see thread_stack.c) comes out of it, so with enough
+         threads alive it runs out (0x8002000c = ENOMEM) and 4K HEVC fell back
+         to software decoding. The workspace is plain CPU memory: take it from
+         direct memory instead, as the heap does. The flexible path above is
+         still tried first, so consoles where it works are unaffected. */
+      size_t flexFree = 0;
+      sceKernelAvailableFlexibleMemorySize(&flexFree);
+      std::string directError;
+      if (!AllocateDirect(m_cpuWorkspaceSize, kProtCpu, m_cpuWorkspaceDirect, directError))
+      {
+        error = Hex("mapping the decoder's CPU workspace", rc) + " (flexible free " +
+                std::to_string(flexFree >> 20) + " MiB); direct fallback: " + directError;
+        return false;
+      }
+      Log("[kodi-ps5] videodec2: CPU workspace %llx from direct memory (flexible map 0x%x, %zu MiB "
+          "flexible free)\n",
+          static_cast<unsigned long long>(m_cpuWorkspaceSize), static_cast<unsigned>(rc),
+          flexFree >> 20);
+      m_cpuWorkspace = m_cpuWorkspaceDirect.address;
     }
   }
   memory.cpu = m_cpuWorkspace;
@@ -398,7 +438,9 @@ void CVideoDec2::Close()
   FreeDirect(m_cpuGpuMemory);
   FreeDirect(m_gpuMemory);
   FreeDirect(m_computeMemory);
-  if (m_cpuWorkspace)
+  if (m_cpuWorkspaceDirect.address)
+    FreeDirect(m_cpuWorkspaceDirect); // fallback path: unmap + release direct memory
+  else if (m_cpuWorkspace)
     munmap(m_cpuWorkspace, m_cpuWorkspaceSize);
   m_cpuWorkspace = nullptr;
   m_cpuWorkspaceSize = 0;

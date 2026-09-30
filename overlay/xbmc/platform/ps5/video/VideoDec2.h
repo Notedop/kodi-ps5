@@ -77,8 +77,10 @@ public:
   bool HasFreeFrame() const;
 
   // Sets up memory, compute queue and decoder for streams up to width x height.
+  // streamLevel: the stream's level_idc (FFmpeg's codecpar->level), 0 if
+  // unknown; raises the decoder's maximum level for streams above the default.
   bool Open(VideoDec2Codec codec, int width, int height, std::string& error,
-            bool interlaced = false);
+            bool interlaced = false, int streamLevel = 0);
   void Close();
 
   // Decode one access unit (Annex-B). Returns false on a decoder error.
@@ -116,6 +118,7 @@ private:
   DirectMemory m_cpuGpuMemory;
   DirectMemory m_inputMemory;
   DirectMemory m_frameMemory;
+  DirectMemory m_cpuWorkspaceDirect; // fallback when flexible memory is exhausted
   void* m_cpuWorkspace = nullptr;
   size_t m_cpuWorkspaceSize = 0;
   size_t m_inputSize = 0;

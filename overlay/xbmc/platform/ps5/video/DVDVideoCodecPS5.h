@@ -56,9 +56,27 @@ public:
   bool AddData(const DemuxPacket& packet) override;
   void Reset() override;
   VCReturn GetPicture(VideoPicture* pVideoPicture) override;
-  const char* GetName() override { return "ps5-videodec2"; }
-  unsigned GetAllowedReferences() override { return 4; }
-  void SetCodecControl(int flags) override { m_codecControlFlags = flags; }
+  const char* GetName() override { return m_software ? m_software->GetName() : "ps5-videodec2"; }
+  unsigned GetAllowedReferences() override
+  {
+    return m_software ? m_software->GetAllowedReferences() : 4;
+  }
+  void SetCodecControl(int flags) override
+  {
+    m_codecControlFlags = flags;
+    if (m_software)
+      m_software->SetCodecControl(flags);
+  }
+  void SetSpeed(int speed) override
+  {
+    if (m_software)
+      m_software->SetSpeed(speed);
+  }
+  bool GetCodecStats(double& pts, int& droppedFrames, int& skippedPics) override
+  {
+    return m_software ? m_software->GetCodecStats(pts, droppedFrames, skippedPics)
+                      : CDVDVideoCodec::GetCodecStats(pts, droppedFrames, skippedPics);
+  }
 
 private:
   struct Decoded
@@ -90,6 +108,14 @@ private:
 
   // shared with zero-copy pictures: the decoder's memory lives until the last
   // picture showing one of its frames is released
+  // Software fallback: if the hardware decoder refuses a stream before it has
+  // produced a single picture, decoding continues on FFmpeg (see
+  // SwitchToSoftware) instead of the player waiting forever for a first frame.
+  bool SwitchToSoftware();
+  std::unique_ptr<CDVDVideoCodec> m_software;
+  CDVDCodecOptions m_options;
+  unsigned m_picturesOut = 0;
+
   std::shared_ptr<KODI::PLATFORM::PS5::CVideoDec2> m_decoder =
       std::make_shared<KODI::PLATFORM::PS5::CVideoDec2>();
   bool m_zeroCopy = false; // kodi-zerocopy, with the GL driver additions present
