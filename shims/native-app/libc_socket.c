@@ -33,10 +33,30 @@ int sceNetGetsockname(int s, SceNetSockaddr* name, int* namelen);
 int sceNetGetpeername(int s, SceNetSockaddr* name, int* namelen);
 int sceNetShutdown(int s, int how);
 int* sceNetErrnoLoc(void);
+int sceNetInit(void);
+int sceNetPoolCreate(const char* name, int size, int flags);
+
+/* sceNet must be initialized before sockets can be created. The resolver shim
+ * (libc_net.c) already relies on a net pool; do the library init once here so
+ * the first Python socket() works. sceNetInit is idempotent-ish: if already
+ * initialized it returns an "already" error, which we ignore. */
+extern void sceKernelDebugOutText(int channel, const char* text);
+static int g_net_ready = 0;
+static void net_init_once(void)
+{
+  if (g_net_ready)
+    return;
+  int r = sceNetInit();                 /* 0 or "already initialized" both fine */
+  int pool = sceNetPoolCreate("kodi-py", 0x10000, 0); /* a heap for socket bufs */
+  (void)r; (void)pool;
+  g_net_ready = 1;
+  char b[64]; const char* m = "[kodi-ps5] pysock net_init done\n";
+  int i=0; while (m[i]) { b[i]=m[i]; i++; } b[i]=0;
+  sceKernelDebugOutText(0, b);
+}
 
 struct sockaddr;
 
-extern void sceKernelDebugOutText(int channel, const char* text);
 static void sce_log(const char* call, int se)
 {
   char b[128];
@@ -95,6 +115,7 @@ static void from_sce(const SceNetSockaddr* in, int inlen, struct sockaddr* sa, u
 
 int ps5_socket(int domain, int type, int protocol)
 {
+  net_init_once();
   int s = sceNetSocket("python", domain, type, protocol);
   return s < 0 ? sce_fail_tagged("socket") : s;
 }
