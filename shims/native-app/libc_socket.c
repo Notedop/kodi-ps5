@@ -135,7 +135,7 @@ int ps5_socket(int domain, int type, int protocol)
   int s = sceNetSocket("python", domain, bare_type, protocol);
   if (s < 0)
   {
-    log_sockargs(domain, type, protocol, s);
+    log_sockargs(domain, bare_type, protocol, s);
     return sce_fail_tagged("socket");
   }
   return s;

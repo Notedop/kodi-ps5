@@ -43,4 +43,12 @@ $CC -O2 -fPIC -c "$HERE/shims/libkodishim/kodishim.c" -o "$BUILD/kodishim.o"
 $CC -O2 -fPIC -c "$HERE/shims/native-app/libc_socket.c" -o "$BUILD/libc_socket.o"
 $AR rcs "$BUILD/libkodishim.a" "$BUILD/kodishim.o" "$BUILD/libc_socket.o"
 sudo install -m644 "$BUILD/libkodishim.a" "$DEST/lib/"
+# cmake does not track a sysroot .a as a dependency of kodi.bin, so a rebuilt
+# libkodishim would otherwise never be relinked in: force the kodi.bin link
+# to rerun on the next cmake --build by removing the stale binary.
+KBUILD="${KODI_BUILD:-$HOME/kodi-ps5-build}"
+if [ -f "$KBUILD/kodi.bin" ]; then
+  rm -f "$KBUILD/kodi.bin"
+  echo "removed stale $KBUILD/kodi.bin so it relinks against the new libkodishim"
+fi
 echo "installed libkodishim into $DEST"
