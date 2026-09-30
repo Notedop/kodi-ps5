@@ -36,10 +36,28 @@ int* sceNetErrnoLoc(void);
 
 struct sockaddr;
 
-static int sce_fail(void)
+extern void sceKernelDebugOutText(int channel, const char* text);
+static void sce_log(const char* call, int se)
+{
+  char b[128];
+  /* minimal formatter: sceNet error is hex */
+  const char* hex = "0123456789abcdef";
+  char code[11]; int n = 0; unsigned v = (unsigned)se;
+  code[n++]='0'; code[n++]='x';
+  for (int sh=28; sh>=0; sh-=4) code[n++]=hex[(v>>sh)&0xf];
+  code[n]=0;
+  int i=0; const char* p="[kodi-ps5] pysock ";
+  while (*p && i<120) b[i++]=*p++;
+  const char* c=call; while (*c && i<120) b[i++]=*c++;
+  b[i++]=' '; const char* q=code; while (*q && i<125) b[i++]=*q++;
+  b[i++]='\n'; b[i]=0;
+  sceKernelDebugOutText(0, b);
+}
+static int sce_fail_tagged(const char* call)
 {
   int* e = sceNetErrnoLoc();
   int se = e ? *e : 0;
+  sce_log(call, se);
   switch (se & 0xff)
   {
     case 0x20: errno = EPIPE; break;
@@ -55,6 +73,7 @@ static int sce_fail(void)
   }
   return -1;
 }
+static int sce_fail(void) { return sce_fail_tagged("?"); }
 
 static int to_sce(const struct sockaddr* sa, unsigned int len, SceNetSockaddr* out, int* outlen)
 {
@@ -77,7 +96,7 @@ static void from_sce(const SceNetSockaddr* in, int inlen, struct sockaddr* sa, u
 int ps5_socket(int domain, int type, int protocol)
 {
   int s = sceNetSocket("python", domain, type, protocol);
-  return s < 0 ? sce_fail() : s;
+  return s < 0 ? sce_fail_tagged("socket") : s;
 }
 int ps5_close(int fd)
 {
@@ -87,7 +106,7 @@ int ps5_connect(int s, const struct sockaddr* addr, unsigned int len)
 {
   SceNetSockaddr sa; int sl;
   if (to_sce(addr, len, &sa, &sl)) { errno = EINVAL; return -1; }
-  return sceNetConnect(s, &sa, sl) < 0 ? sce_fail() : 0;
+  return sceNetConnect(s, &sa, sl) < 0 ? sce_fail_tagged("connect") : 0;
 }
 int ps5_bind(int s, const struct sockaddr* addr, unsigned int len)
 {
@@ -104,13 +123,13 @@ long ps5_sendto(int s, const void* buf, unsigned long len, int flags, const stru
   SceNetSockaddr sa; int sl = 0; const SceNetSockaddr* pto = NULL;
   if (to && to_sce(to, tolen, &sa, &sl) == 0) pto = &sa;
   int r = sceNetSendto(s, buf, (size_t)len, flags, pto, sl);
-  return r < 0 ? sce_fail() : r;
+  return r < 0 ? sce_fail_tagged("send") : r;
 }
 long ps5_recvfrom(int s, void* buf, unsigned long len, int flags, struct sockaddr* from, unsigned int* fromlen)
 {
   SceNetSockaddr sa; int sl = (int)sizeof sa;
   int r = sceNetRecvfrom(s, buf, (size_t)len, flags, from ? &sa : NULL, from ? &sl : NULL);
-  if (r < 0) return sce_fail();
+  if (r < 0) return sce_fail_tagged("recv");
   if (from) from_sce(&sa, sl, from, fromlen);
   return r;
 }
@@ -124,7 +143,7 @@ long ps5_recv(int s, void* buf, unsigned long len, int flags)
 }
 int ps5_setsockopt(int s, int level, int opt, const void* val, unsigned int len)
 {
-  return sceNetSetsockopt(s, level, opt, val, (int)len) < 0 ? sce_fail() : 0;
+  return sceNetSetsockopt(s, level, opt, val, (int)len) < 0 ? sce_fail_tagged("setsockopt") : 0;
 }
 int ps5_getsockopt(int s, int level, int opt, void* val, unsigned int* len)
 {
