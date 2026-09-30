@@ -34,9 +34,6 @@ extern "C"
 
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
-#include <deque>
-#include <string>
 #include <cstdlib>
 #include <cstring>
 
@@ -53,12 +50,6 @@ using namespace KODI::PLATFORM::PS5;
 namespace
 {
 constexpr unsigned kMaxErrorsInRow = 60; // then give up (Kodi shows an error)
-// Before the first picture: this many failed decodes (in total, not in a row)
-// hand the stream to FFmpeg. Kept below the 20 decoder frame buffers, because
-// a refused access unit can leave its frame with the decoder: after 20 of them
-// no frame is free, decoding stalls and the in-a-row count is never reached
-// (seen with a 1080p HEVC Main10 file refused with 0x811d0303).
-constexpr unsigned kFailuresBeforeSoftware = 8;
 
 bool IsH264Supported(int profile)
 {
@@ -383,23 +374,7 @@ bool CDVDVideoCodecPS5::SetupBitstreamFilter(const CDVDStreamInfo& hints)
 bool CDVDVideoCodecPS5::AddData(const DemuxPacket& packet)
 {
   if (m_software)
-  {
-    // what the hardware was given first, then the new packets
-    while (!m_softwareQueue.empty())
-    {
-      ReplayPacket& r = m_softwareQueue.front();
-      DemuxPacket p;
-      p.pData = r.data.data();
-      p.iSize = static_cast<int>(r.data.size());
-      p.pts = r.pts;
-      p.dts = r.dts;
-      p.recoveryPoint = r.recoveryPoint;
-      if (!m_software->AddData(p))
-        return false; // Kodi takes a picture and offers this packet again
-      m_softwareQueue.pop_front();
-    }
     return m_software->AddData(packet);
-  }
   if (m_fatal)
     return false;
   if (!packet.pData || packet.iSize <= 0)
@@ -409,27 +384,8 @@ bool CDVDVideoCodecPS5::AddData(const DemuxPacket& packet)
     return false;
   // zero-copy: every frame shown or held - Kodi releases pictures first
   if (!RetryPending() || !m_decoder->HasFreeFrame())
-  {
-    // Nothing shown yet, decodes have failed, and now no frame is free: the
-    // decoder kept the refused frames and will never return a picture.
-    if (m_picturesOut == 0 && m_decoded.empty() && m_failuresBeforeFirst > 0)
-    {
-      m_recoveryPending = true;
-      if (RunRecovery())
-        return AddData(packet); // the new state takes this packet
-    }
     return false;
-  }
 
-  BufferForReplay(packet);
-  const bool ok = FeedHardware(packet);
-  if (m_recoveryPending)
-    return RunRecovery() || !m_fatal; // the replay included this packet
-  return ok;
-}
-
-bool CDVDVideoCodecPS5::FeedHardware(const DemuxPacket& packet)
-{
   const double pts = packet.pts != DVD_NOPTS_VALUE ? packet.pts : packet.dts;
   if (pts != DVD_NOPTS_VALUE)
   {
@@ -457,14 +413,7 @@ bool CDVDVideoCodecPS5::FeedHardware(const DemuxPacket& packet)
   }
 
   if (!m_bsf)
-  {
-    if (!m_pendingAus.empty()) // a replay can outrun the free frames
-    {
-      m_pendingAus.emplace_back(packet.pData, packet.pData + packet.iSize);
-      return true;
-    }
     return DecodeOne(packet.pData, static_cast<size_t>(packet.iSize)) || !m_fatal;
-  }
 
   av_packet_unref(m_packet);
   if (av_new_packet(m_packet, packet.iSize) < 0)
@@ -538,22 +487,8 @@ bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
 {
   // switched to software mid-packet (the bitstream-filter loop may still hold
   // access units): the hardware decoder is closed, drop the rest
-  if (m_software || m_recoveryPending)
-    return true; // the stream is replayed from its start
-  std::vector<uint8_t> cleaned;
-  if (m_cleanStream)
-  {
-    bool irap = false, hasSlice = false;
-    CleanAccessUnit(data, size, cleaned, irap, hasSlice);
-    if (!hasSlice || (!m_seenIrap && !irap))
-    {
-      NextPts(); // nothing to decode here (yet): its timestamp goes with it
-      return true;
-    }
-    m_seenIrap = true;
-    data = cleaned.data();
-    size = cleaned.size();
-  }
+  if (m_software)
+    return true;
   if (m_hevc && m_skipRasl)
   {
     if (HevcAccessUnitIsRasl(data, size))
@@ -587,26 +522,14 @@ bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
   {
     if (m_errorsInRow++ < 5)
       CLog::Log(LOGWARNING, "CDVDVideoCodecPS5: {}", error);
-    if (m_picturesOut == 0 && m_decoded.empty())
-    {
-      if (!m_fingerprinted)
-      {
-        // what the refused stream looks like, once: the NAL units of the
-        // parameter sets and of the first access unit that was refused
-        m_fingerprinted = true;
-        LogFingerprint("extradata", m_parameterSets.data(), m_parameterSets.size());
-        LogFingerprint("refused access unit", data, size);
-      }
-      if (++m_failuresBeforeFirst >= kFailuresBeforeSoftware)
-      {
-        m_recoveryPending = true; // AddData replays the stream in the next stage
-        return false;
-      }
-    }
     if (m_errorsInRow >= kMaxErrorsInRow)
     {
       CLog::Log(LOGERROR, "CDVDVideoCodecPS5: {} decode errors in a row, giving up",
                 m_errorsInRow);
+      // Nothing shown yet: the hardware refused this stream outright. Continue
+      // in software rather than leaving the player waiting for a first frame.
+      if (m_picturesOut == 0 && m_decoded.empty() && SwitchToSoftware())
+        return false; // this access unit is dropped; FFmpeg resyncs on the next keyframe
       m_fatal = true;
     }
     return false;
@@ -988,20 +911,9 @@ void CDVDVideoCodecPS5::Reset()
 {
   if (m_software)
   {
-    m_softwareQueue.clear(); // a seek: the old position is not wanted any more
     m_software->Reset();
     return;
   }
-  ResetDecoderState();
-  m_replay.clear();
-  m_replayBytes = 0;
-  m_replayOverflow = false;
-  m_failuresBeforeFirst = 0;
-  m_seenIrap = false;
-}
-
-void CDVDVideoCodecPS5::ResetDecoderState()
-{
   ClearQueue();
   m_pts.clear();
   m_skipRasl = m_hevc;
@@ -1048,14 +960,7 @@ CDVDVideoCodec::VCReturn CDVDVideoCodecPS5::GetPicture(VideoPicture* pVideoPictu
 
   Decoded d = m_decoded.front();
   m_decoded.pop_front();
-  if (m_picturesOut++ == 0)
-  {
-    m_replay.clear(); // the hardware takes this stream: nothing to replay
-    m_replayBytes = 0;
-    if (m_cleanStream)
-      CLog::Log(LOGINFO, "CDVDVideoCodecPS5: {} decodes in hardware with the cleaned bitstream",
-                m_streamName);
-  }
+  ++m_picturesOut;
 
   pVideoPicture->Reset(); // releases the previous picture's buffer
   pVideoPicture->videoBuffer = d.buffer;
@@ -1113,304 +1018,5 @@ bool CDVDVideoCodecPS5::SwitchToSoftware()
   m_pts.clear();
   m_decoder->Close();
   m_software = std::move(software);
-  m_softwareQueue = std::move(m_replay); // from the start, not from the next keyframe
-  m_replay.clear();
-  m_replayBytes = 0;
   return true;
-}
-
-// ---------------------------------------------------------------------------
-// Recovery when the hardware refuses a stream before its first picture
-// ---------------------------------------------------------------------------
-namespace
-{
-struct NalRef
-{
-  const uint8_t* p;
-  size_t n;
-};
-
-// Annex-B access unit -> NAL unit payloads (without start codes)
-std::vector<NalRef> SplitAnnexB(const uint8_t* d, size_t n)
-{
-  std::vector<NalRef> out;
-  size_t i = 0;
-  size_t start = SIZE_MAX;
-  while (i < n)
-  {
-    size_t len = 0;
-    if (i + 4 <= n && d[i] == 0 && d[i + 1] == 0 && d[i + 2] == 0 && d[i + 3] == 1)
-      len = 4;
-    else if (i + 3 <= n && d[i] == 0 && d[i + 1] == 0 && d[i + 2] == 1)
-      len = 3;
-    if (len)
-    {
-      if (start != SIZE_MAX && i > start)
-        out.push_back({d + start, i - start});
-      i += len;
-      start = i;
-    }
-    else
-      ++i;
-  }
-  if (start != SIZE_MAX && start < n)
-    out.push_back({d + start, n - start});
-  return out;
-}
-
-// the first bytes of a NAL unit with emulation prevention removed
-std::vector<uint8_t> RbspHead(const NalRef& nal, size_t skip, size_t limit = 48)
-{
-  std::vector<uint8_t> out;
-  int zeros = 0;
-  for (size_t i = skip; i < nal.n && out.size() < limit; ++i)
-  {
-    if (zeros >= 2 && nal.p[i] == 3)
-    {
-      zeros = 0;
-      continue;
-    }
-    zeros = nal.p[i] == 0 ? zeros + 1 : 0;
-    out.push_back(nal.p[i]);
-  }
-  return out;
-}
-
-struct Bits
-{
-  const std::vector<uint8_t>& b;
-  size_t pos = 0;
-  bool ok = true;
-  unsigned Read(unsigned count)
-  {
-    unsigned v = 0;
-    for (unsigned i = 0; i < count; ++i, ++pos)
-    {
-      if (pos / 8 >= b.size())
-      {
-        ok = false;
-        return 0;
-      }
-      v = (v << 1) | ((b[pos / 8] >> (7 - pos % 8)) & 1u);
-    }
-    return v;
-  }
-  unsigned Ue()
-  {
-    unsigned zeros = 0;
-    while (ok && Read(1) == 0 && zeros < 31)
-      ++zeros;
-    return ok ? ((1u << zeros) - 1 + Read(zeros)) : 0;
-  }
-};
-
-const char* HevcNalName(unsigned t)
-{
-  switch (t)
-  {
-    case 0: case 1: return "TRAIL";
-    case 8: case 9: return "RASL";
-    case 6: case 7: return "RADL";
-    case 16: case 17: case 18: return "BLA";
-    case 19: return "IDR_W_RADL";
-    case 20: return "IDR_N_LP";
-    case 21: return "CRA";
-    case 32: return "VPS";
-    case 33: return "SPS";
-    case 34: return "PPS";
-    case 35: return "AUD";
-    case 36: return "EOS";
-    case 37: return "EOB";
-    case 38: return "FD";
-    case 39: return "SEI";
-    case 40: return "SEI_SUFFIX";
-    case 62: return "DV_RPU";
-    case 63: return "DV_EL";
-    default: return t <= 31 ? "VCL" : "OTHER";
-  }
-}
-} // namespace
-
-void CDVDVideoCodecPS5::BufferForReplay(const DemuxPacket& packet)
-{
-  if (m_picturesOut > 0 || m_replayOverflow || !packet.pData || packet.iSize <= 0)
-    return;
-  constexpr size_t kMaxReplayPackets = 400;
-  constexpr size_t kMaxReplayBytes = size_t{128} << 20;
-  const size_t size = static_cast<size_t>(packet.iSize);
-  if (m_replay.size() >= kMaxReplayPackets || m_replayBytes + size > kMaxReplayBytes)
-  {
-    // too long without a picture to keep it all: recovery then starts at the
-    // next keyframe instead of at the beginning
-    m_replayOverflow = true;
-    m_replay.clear();
-    m_replayBytes = 0;
-    return;
-  }
-  m_replay.push_back(ReplayPacket{std::vector<uint8_t>(packet.pData, packet.pData + size),
-                                  packet.pts, packet.dts, packet.recoveryPoint});
-  m_replayBytes += size;
-}
-
-bool CDVDVideoCodecPS5::RunRecovery()
-{
-  m_recoveryPending = false;
-  ++m_recoveryStage;
-  if (m_recoveryStage == 1 && !m_vp9)
-  {
-    CLog::Log(LOGWARNING,
-              "CDVDVideoCodecPS5: the hardware decoder refused {} ({} failed decodes, nothing "
-              "shown); retrying in hardware from the start with a cleaned bitstream",
-              m_streamName, m_failuresBeforeFirst);
-    ResetDecoderState();
-    m_cleanStream = true;
-    m_seenIrap = false;
-    m_failuresBeforeFirst = 0;
-    m_fingerprinted = false; // describe the cleaned stream too, if it is refused
-    std::vector<uint8_t> cleanedSets;
-    bool irap = false, hasSlice = false;
-    CleanAccessUnit(m_parameterSets.data(), m_parameterSets.size(), cleanedSets, irap, hasSlice);
-    m_parameterSets = std::move(cleanedSets);
-    m_prependParameterSets = !m_parameterSets.empty();
-    const std::deque<ReplayPacket> replay = m_replay; // stage 2 needs it again
-    for (const ReplayPacket& r : replay)
-    {
-      DemuxPacket p;
-      p.pData = const_cast<uint8_t*>(r.data.data());
-      p.iSize = static_cast<int>(r.data.size());
-      p.pts = r.pts;
-      p.dts = r.dts;
-      p.recoveryPoint = r.recoveryPoint;
-      FeedHardware(p);
-      if (m_recoveryPending)
-        return RunRecovery(); // refused again: software
-    }
-    return true;
-  }
-  if (!SwitchToSoftware())
-  {
-    m_fatal = true;
-    return false;
-  }
-  return true;
-}
-
-bool CDVDVideoCodecPS5::CleanAccessUnit(const uint8_t* data, size_t size,
-                                        std::vector<uint8_t>& out, bool& irap,
-                                        bool& hasSlice) const
-{
-  static const uint8_t startCode[4] = {0, 0, 0, 1};
-  out.clear();
-  irap = false;
-  hasSlice = false;
-  if (!data || size == 0)
-    return false;
-  for (const NalRef& nal : SplitAnnexB(data, size))
-  {
-    if (nal.n == 0)
-      continue;
-    bool keep = false;
-    if (m_hevc)
-    {
-      const unsigned t = (nal.p[0] >> 1) & 0x3f;
-      // VCL, VPS/SPS/PPS, end of sequence/bitstream; not AUD, filler, SEI,
-      // reserved or unspecified (Dolby Vision RPU 62 / enhancement layer 63)
-      keep = t <= 34 || t == 36 || t == 37;
-      if (t <= 31)
-      {
-        hasSlice = true;
-        if (t >= 16 && t <= 23)
-          irap = true;
-      }
-    }
-    else
-    {
-      const unsigned t = nal.p[0] & 0x1f;
-      // slices, SPS, PPS, end of sequence/stream; not SEI, AUD, filler or
-      // extensions (SVC/MVC: the base view only)
-      keep = (t >= 1 && t <= 5) || t == 7 || t == 8 || t == 10 || t == 11;
-      if (t >= 1 && t <= 5)
-      {
-        hasSlice = true;
-        if (t == 5)
-          irap = true;
-        else if (t == 1)
-        {
-          const std::vector<uint8_t> head = RbspHead(nal, 1);
-          Bits bits{head};
-          bits.Ue(); // first_mb_in_slice
-          const unsigned sliceType = bits.Ue();
-          if (bits.ok && (sliceType % 5 == 2 || sliceType % 5 == 4))
-            irap = true; // I/SI slice: a usable start for recovery-point streams
-        }
-      }
-    }
-    if (keep)
-    {
-      out.insert(out.end(), startCode, startCode + 4);
-      out.insert(out.end(), nal.p, nal.p + nal.n);
-    }
-  }
-  return true;
-}
-
-void CDVDVideoCodecPS5::LogFingerprint(const char* what, const uint8_t* data, size_t size) const
-{
-  std::string text;
-  unsigned count = 0;
-  for (const NalRef& nal : SplitAnnexB(data, size))
-  {
-    if (nal.n == 0)
-      continue;
-    if (++count > 24)
-    {
-      text += " ...";
-      break;
-    }
-    text += ' ';
-    if (m_hevc && nal.n >= 2)
-    {
-      const unsigned t = (nal.p[0] >> 1) & 0x3f;
-      text += std::to_string(t) + ":" + HevcNalName(t);
-      if (t == 34)
-      {
-        const std::vector<uint8_t> head = RbspHead(nal, 2);
-        Bits bits{head};
-        const unsigned pps = bits.Ue();
-        const unsigned sps = bits.Ue();
-        if (bits.ok)
-          text += "#" + std::to_string(pps) + "(sps " + std::to_string(sps) + ")";
-      }
-      else if (t <= 31)
-      {
-        const std::vector<uint8_t> head = RbspHead(nal, 2);
-        Bits bits{head};
-        bits.Read(1); // first_slice_segment_in_pic_flag
-        if (t >= 16 && t <= 23)
-          bits.Read(1); // no_output_of_prior_pics_flag
-        const unsigned pps = bits.Ue();
-        if (bits.ok)
-          text += "->pps " + std::to_string(pps);
-      }
-    }
-    else if (!m_hevc && nal.n >= 1)
-    {
-      const unsigned t = nal.p[0] & 0x1f;
-      text += std::to_string(t);
-      if (t == 7 && nal.n >= 4)
-        text += ":SPS(profile " + std::to_string(nal.p[1]) + ", level " + std::to_string(nal.p[3]) +
-                ")";
-      else if (t == 8)
-        text += ":PPS";
-      else if (t == 6)
-        text += ":SEI";
-      else if (t == 5)
-        text += ":IDR";
-    }
-    text += "[" + std::to_string(nal.n) + "]";
-  }
-  CLog::Log(LOGINFO,
-            "CDVDVideoCodecPS5: {} ({} bytes; stream profile {}, level {}, {}x{}, {} bit):{}", what,
-            size, m_hints.profile, m_hints.level, m_hints.width, m_hints.height,
-            m_hints.bitsperpixel, text.empty() ? " (no NAL units)" : text);
 }

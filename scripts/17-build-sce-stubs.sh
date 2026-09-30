@@ -63,4 +63,4 @@ sudo install -m644 "$WORK/libSceVideoOut.so" "$DEST/libSceVideoOut.so"
 echo "installed libSceVideoOut stub ($COUNT symbols incl. sceVideoOutVrrUnpegFromFixedRate, soname $SONAME) into $DEST"
 
 # a rebuilt sysroot library must be relinked into kodi.bin (see scripts/lib/sysroot-changed.sh)
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sysroot-changed.sh"; sysroot_changed
+. "$HERE/lib/sysroot-changed.sh"; sysroot_changed
