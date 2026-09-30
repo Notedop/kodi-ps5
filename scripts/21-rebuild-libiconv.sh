@@ -87,3 +87,6 @@ fi
 echo
 echo "Done. Relink Kodi against the new library (no Kodi rebuild needed):"
 echo "  bash scripts/30-deploy.sh"
+
+# a rebuilt sysroot library must be relinked into kodi.bin (see scripts/lib/sysroot-changed.sh)
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sysroot-changed.sh"; sysroot_changed

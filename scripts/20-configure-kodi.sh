@@ -141,6 +141,16 @@ fi
 # CMake caches pkg-config results; FFmpeg's link flags must be re-read every
 # configure, or a rebuilt FFmpeg (new dependencies such as dav1d) links with
 # the flags of the old one and kodi.bin fails with undefined symbols.
+# Opt-in ccache (KODI_PS5_CCACHE=1): configure's overlay re-copy and patch
+# re-apply can touch timestamps, so a full `cmake --build` recompiles far more
+# than changed. ccache makes every unchanged file a cache hit. Opt-in so the
+# default build path is unchanged; first build after enabling only fills the cache.
+CCACHE_ARGS=()
+if [ "${KODI_PS5_CCACHE:-0}" = 1 ] && command -v ccache >/dev/null; then
+  CCACHE_ARGS=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+  echo "==> ccache enabled ($(ccache -s 2>/dev/null | grep -iE 'hit rate|cache size' | head -1 | xargs))"
+fi
+
 cmake -S "$KODI_SRC" -B "$BUILD" -G Ninja \
   -U "FFMPEG_*" -U "Python3_*" -U "PYTHON_*" \
   -DCMAKE_TOOLCHAIN_FILE="$HERE/toolchain/ps5-kodi.cmake" \
@@ -155,6 +165,7 @@ cmake -S "$KODI_SRC" -B "$BUILD" -G Ninja \
   -DINTERNAL_TEXTUREPACKER_INSTALLABLE=FALSE \
   -DENABLE_INTERNAL_FFMPEG=OFF \
   "${PYTHON_ARGS[@]}" \
+  "${CCACHE_ARGS[@]}" \
   -DENABLE_TESTING=OFF \
   -DVERBOSE_FIND=ON \
   "$@"

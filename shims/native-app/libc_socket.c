@@ -52,9 +52,6 @@ static void net_init_once(void)
   int pool = sceNetPoolCreate("kodi-py", 0x10000, 0); /* a heap for socket bufs */
   (void)r; (void)pool;
   g_net_ready = 1;
-  char b[64]; const char* m = "[kodi-ps5] pysock net_init done\n";
-  int i=0; while (m[i]) { b[i]=m[i]; i++; } b[i]=0;
-  sceKernelDebugOutText(0, b);
 }
 
 struct sockaddr;
@@ -115,16 +112,6 @@ static void from_sce(const SceNetSockaddr* in, int inlen, struct sockaddr* sa, u
   *len = (unsigned int)n;
 }
 
-static void log_sockargs(int d, int t, int p, int rc)
-{
-  const char* hex="0123456789abcdef";
-  char b[96]; int i=0; const char* m="[kodi-ps5] pysock socket(d,t,p,rc)=";
-  while (*m) b[i++]=*m++;
-  int vals[4]={d,t,p,rc};
-  for (int k=0;k<4;k++){ unsigned v=(unsigned)vals[k]; b[i++]='0';b[i++]='x';
-    for(int sh=28;sh>=0;sh-=4)b[i++]=hex[(v>>sh)&0xf]; b[i++]=(k<3)?',':' '; }
-  b[i++]='\n'; b[i]=0; sceKernelDebugOutText(0,b);
-}
 int ps5_socket(int domain, int type, int protocol)
 {
   net_init_once();
@@ -137,7 +124,6 @@ int ps5_socket(int domain, int type, int protocol)
   int s = sceNetSocket("python", domain, bare_type, protocol);
   if (s < 0)
   {
-    log_sockargs(domain, bare_type, protocol, s);
     return sce_fail_tagged("socket");
   }
   return s;

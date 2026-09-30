@@ -108,6 +108,35 @@ build() {
         --with-system-expat=yes --disable-test-modules \
         --with-openssl="${PS5_SYSROOT}${PS5_HBROOT}" \
         MODULE_BUILDTYPE=static "${_modules[@]}" "${_cache[@]}"
+
+    # Consistency check of the configure result, BEFORE the 20-minute compile.
+    # Two whole build iterations were lost to cache mistakes that only surfaced
+    # as compile errors deep in posixmodule.c: a misspelled cache key (fexecv
+    # vs fexecve) that silently did nothing, and disabling a header while its
+    # functions stayed enabled (HAVE_SCHED_H off, HAVE_SCHED_SETPARAM on ->
+    # sched_param_desc undeclared). Encode those invariants here.
+    _pc=pyconfig.h
+    _have() { grep -qE "^#define $1 1" "$_pc"; }
+    _fail=0
+    # every function we meant to disable must really be off
+    for f in EXECV FEXECVE POSIX_SPAWN POSIX_SPAWNP FORK FORK1 VFORK WAIT WAIT3 WAIT4 WAITPID \
+             SCHED_SETPARAM SCHED_SETSCHEDULER SCHED_RR_GET_INTERVAL SCHED_SETAFFINITY \
+             PTHREAD_GETNAME_NP PTHREAD_SETNAME_NP PTHREAD_SET_NAME_NP GETC_UNLOCKED; do
+      if _have "HAVE_$f"; then echo "!! pyconfig.h: HAVE_$f is defined but the cache disables it (typo in _cache?)"; _fail=1; fi
+    done
+    # header-off implies its functions off
+    if ! _have HAVE_SCHED_H; then
+      for f in SCHED_SETPARAM SCHED_SETSCHEDULER; do
+        _have "HAVE_$f" && { echo "!! pyconfig.h: HAVE_$f without HAVE_SCHED_H (inconsistent)"; _fail=1; }
+      done
+    fi
+    # things that MUST be on for a usable interpreter
+    for f in GETENTROPY CLOCK_GETTIME; do
+      _have "HAVE_$f" || { echo "!! pyconfig.h: HAVE_$f missing - Python will not start"; _fail=1; }
+    done
+    grep -q "PY_SSL_DEFAULT_CIPHERS\|OPENSSL" "$_pc" || true
+    [ "$_fail" = 0 ] || { echo "!! configure result inconsistent; fix _cache before compiling"; exit 1; }
+    echo "==> pyconfig.h consistency check passed"
     make libpython3.14.a
     make pybuilddir.txt   # the target's _sysconfigdata
 }
