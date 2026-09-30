@@ -113,10 +113,21 @@ static void from_sce(const SceNetSockaddr* in, int inlen, struct sockaddr* sa, u
   *len = (unsigned int)n;
 }
 
+static void log_sockargs(int d, int t, int p, int rc)
+{
+  const char* hex="0123456789abcdef";
+  char b[96]; int i=0; const char* m="[kodi-ps5] pysock socket(d,t,p,rc)=";
+  while (*m) b[i++]=*m++;
+  int vals[4]={d,t,p,rc};
+  for (int k=0;k<4;k++){ unsigned v=(unsigned)vals[k]; b[i++]='0';b[i++]='x';
+    for(int sh=28;sh>=0;sh-=4)b[i++]=hex[(v>>sh)&0xf]; b[i++]=(k<3)?',':' '; }
+  b[i++]='\n'; b[i]=0; sceKernelDebugOutText(0,b);
+}
 int ps5_socket(int domain, int type, int protocol)
 {
   net_init_once();
   int s = sceNetSocket("python", domain, type, protocol);
+  log_sockargs(domain, type, protocol, s);
   return s < 0 ? sce_fail_tagged("socket") : s;
 }
 int ps5_close(int fd)
