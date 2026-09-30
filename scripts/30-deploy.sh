@@ -82,7 +82,6 @@ cp "$HERE/shims/native-app/libc_net.c" "$APP/src/"     # getaddrinfo & co on Son
 cp "$HERE/shims/native-app/thread_stack.c" "$APP/src/" # >= 1 MiB thread stacks (--wrap=pthread_create)
 cp "$HERE/shims/native-app/pipe_fallback.c" "$APP/src/" # pipe() via socketpair, fcntl F_SETFD as success (--wrap=pipe, --wrap=fcntl)
 cp "$HERE/shims/native-app/stdio_tee.c" "$APP/src/"    # fd 1/2 -> klog (--wrap=write): Python fatal init errors, aborts
-cp "$HERE/shims/native-app/libc_socket.c" "$APP/src/"  # ps5_* socket funcs (libSceNet) for Python's socket module only
 # libScePosixForWebKit is a browser-only system module: a title never gets it,
 # and everything imported from it stays at address 0 (first launch: isatty()).
 # Remove its link stub so nothing can bind to it; the shims above cover what

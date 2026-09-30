@@ -96,7 +96,9 @@ if(ENABLE_PYTHON)
   # getentropy/explicit_bzero: referenced by libpython, absent from the SDK
   # stubs; provided by shims/libkodishim (built by scripts/12). At the final
   # eboot link libc_posix.o's getentropy takes precedence (object before archive).
-  list(APPEND SYSTEM_LDFLAGS -lkodishim)
+  # libkodishim also carries libc_socket.o (ps5_* socket funcs Python's socket
+  # module is redirected to); those call sceNet*, so -lSceNet must follow it.
+  list(APPEND SYSTEM_LDFLAGS -lkodishim -lSceNet)
 endif()
 
 list(APPEND AUDIO_BACKENDS_LIST "ps5")
