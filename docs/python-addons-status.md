@@ -19,7 +19,7 @@ add-on caching working, script completes in ~4 s.
 | Runtime | fopen errno not POSIX (getpath pyvenv.cfg probe → "error evaluating path") | `--wrap=fopen` normalizes errno via stat |
 | Runtime | FreeBSD stdio inline macros read FILE internals (C only; libc.prx layout differs) → tokenizer GPF | `#undef` the macros in Python.h (`PS5_CLEANROOM_STDIO`); `getc_unlocked=no` |
 | Runtime | Python init failure exit()'d mid-startup, error invisible | patch 0018: `Py_InitializeFromConfig` + CLog |
-| Network | raw BSD socket()/connect()/ioctl denied by sandbox (EACCES) | `ps5_pysocket.h` redirects **only socketmodule.c** to `ps5_*` over libSceNet |
+| Network | `ioctl(FIONBIO)` denied by the sandbox (EACCES); Python's socket module moved to libSceNet | `ps5_pysocket.h` redirects **only socketmodule.c** to `ps5_*` over libSceNet |
 | Network | sceNetSocket rejects SOCK_CLOEXEC flag (0x8041012b) | mask flag bits |
 | Network | ioctl(FIONBIO) raw syscall denied | `ps5_ioctl` → `sceNetSetsockopt(SO_NBIO)` |
 

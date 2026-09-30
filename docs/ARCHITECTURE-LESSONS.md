@@ -13,7 +13,7 @@ different code bases that a Linux port treats as one "libc":
 
 | What | Provided by | Trust level |
 |---|---|---|
-| Kernel syscalls (`open`, `stat`, `nanosleep`, sockets…) | `libkernel.sprx` | Real, but the **sandbox denies some** (`connect`, `ioctl`, `getcwd` semantics) |
+| Kernel syscalls (`open`, `stat`, `nanosleep`, sockets…) | `libkernel.sprx` | Real, but the **sandbox denies some** (`ioctl(FIONBIO)` on sockets, for one); plain `socket()`/`connect()` work (libsmb2 uses them) |
 | C library (`fopen`, `getc`, `malloc`, `FILE`…) | the boilerplate's **clean-room `libc.prx`** | Incomplete; its `FILE` layout is **not** FreeBSD's |
 | Networking | `libSceNet` (`sceNet*`) | The **only** network path a title may use |
 
@@ -125,3 +125,21 @@ instead of `exit()`ing mid-startup). Both improve every platform.
   + `cmake --build` + `30-deploy.sh`; no configure, no Python rebuild.
 - A Python header/patch change needs `19-build-python.sh`; a shim-only change
   does not.
+
+## 9. Corrections and later findings
+
+- **Raw sockets are not blocked.** Kodi's SMB client (libsmb2) uses plain
+  `socket()`/`connect()` and works. Python's `EACCES` came from
+  `ioctl(FIONBIO)`, the one call between `socket()` and `connect()`; the
+  sceNet route was built before that was known. It works and stays, but the
+  cause was narrower than first written.
+- **VideoDec2 error codes** (named in ProsperoTV's messages): `0x811D0301`
+  invalid access unit, `0x811D0302` stream exceeds the configured capacity
+  (DPB or coded size), `0x811D0303` no valid video sequence (parameter sets),
+  `0x811D0304` fatal bitstream error.
+- **`0x811D0303` on a whole file** was an MKV with no codec extradata whose
+  frames are length-prefixed: nothing converted them to Annex-B. The
+  fingerprint logging (NAL units of the refused frame) found it in one run;
+  logging *what the decoder was given* beats guessing *why it refused*.
+- **Other PS5 projects confirm the scarce flexible-memory pool** (EVO Player
+  shrinks buffers to give memory back to it). Thread stacks come out of it too.

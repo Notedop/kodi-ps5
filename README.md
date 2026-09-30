@@ -78,9 +78,10 @@ the daemon consumes.
 
 **Close Kodi before replacing its files** over FTP: overwriting a running
 title's files can crash the console. Usually only `eboot.bin` changes (plus `sce_sys/` when the title
-metadata changes, `share/` when Kodi's data files change). Kodi keeps its data in
-`/data/kodi` when the loader lets a title reach `/data`, otherwise in the title
-folder itself (`/data/homebrew/PPSA99420/kodi`).
+metadata changes, `share/` when Kodi's data files change; 0.9 adds Python's
+standard library under `share/kodi/python/`, so copy the whole folder once).
+Kodi keeps its data in the title's save data (`/download0/.kodi`), which
+updates leave alone; `kodi-reset` clears it (see *Switches*).
 
 ## What works
 
@@ -101,14 +102,25 @@ folder itself (`/data/homebrew/PPSA99420/kodi`).
 - **Sources:** SMB2/3 and NFS network shares, UPnP; USB drives and `/data`
   with PS5-Lapy-JB-Daemon loaded (see *USB drives*).
 - **Library:** thumbnails, databases and settings persist between sessions.
+- **Internet:** Kodi's add-on repository, add-on installs and updates,
+  artwork and scraper downloads (HTTPS, verified against Kodi's CA bundle).
+- **Python add-ons** (CPython 3.14, built into Kodi): scrapers, weather,
+  plugins and services, including their own HTTPS requests.
+- **Hardware decoding recovery:** a file the decoder refuses before its first
+  picture is replayed from the start, first in hardware with a cleaned
+  bitstream, then in software, instead of hanging on the busy spinner.
 - **DualSense** navigation (buttons mapped to Kodi's keyboard actions), and
   the PS5's own on-screen keyboard for text entry (contributed by Notedop).
 
 ## What doesn't yet
 
-- **Internet access** (add-on repository, scrapers, online streams): in progress.
-- **Add-ons with code:** Python add-ons (Python is not built yet) and binary
-  add-ons (a title cannot load libraries at run time).
+- **Binary add-ons**, and Python add-ons that need a compiled module: a title
+  cannot load libraries at run time. This covers `inputstream.adaptive`
+  (DASH/HLS/DRM streams, e.g. many broadcaster plugins), `script.module.pil`
+  (Pillow; e.g. the Open-Meteo weather add-on) and `pycryptodome`. Pure-Python
+  add-ons work.
+- **Add-on installs are slow:** tens of seconds per package; downloads
+  themselves are fast. Being investigated.
 - **Hardware decoding** of HEVC 4:2:2/4:4:4 and 12-bit video: FFmpeg decodes
   them, which is slow at high resolutions. H.264 High 10 is offered to the
   hardware decoder and falls back to FFmpeg if the decoder refuses it.
@@ -212,7 +224,7 @@ what gets fixed.
 ## Building
 
 Kodi is not forked. This repository is an **overlay**: a `ps5` platform directory
-copied on top of a stock Kodi checkout, sixteen small Kodi patches, C shims that
+copied on top of a stock Kodi checkout, nineteen small Kodi patches, C shims that
 fill gaps in what a title's system libraries provide, and the scripts that set
 up the cross toolchain, configure, build and package.
 
@@ -243,7 +255,7 @@ bash scripts/15-build-dav1d.sh           # dav1d AV1 decoder (needs nasm on the 
 bash scripts/16-build-ffmpeg.sh          # FFmpeg 7.1 with libdav1d (Kodi needs >= 7.1)
 bash scripts/17-build-sce-stubs.sh       # link stubs: libSceVideodec2, extended libSceVideoOut
 bash scripts/18-build-ps5-opengl.sh      # ps5-opengl SDK with Kodi's additions (patches/ps5-opengl)
-bash scripts/19-build-python.sh          # optional: static CPython 3.14 -> Python add-ons (needs swig, java)
+bash scripts/19-build-python.sh          # optional: static CPython 3.14 -> Python add-ons (needs java; configure builds SWIG)
 
 # 3. Configure (applies overlay + patches), build, package
 bash scripts/20-configure-kodi.sh
@@ -272,7 +284,7 @@ overlay/                        copied onto a Kodi checkout by scripts/20-config
     video/                      hardware decoder (CVideoDec2, CDVDVideoCodecPS5), zero-copy buffers and renderer
     sce/                        clean-room prototypes of the Sony libraries used
   xbmc/windowing/ps5/           CWinSystemPS5, CWinSystemPS5GLContext (EGL), VRR pacing, HDR output
-patches/kodi/                   sixteen Kodi patches (charset, SMB hooks, log sink, renderer, refresh, HDR framebuffer, HLG shader, native keyboard, curl idle-close off-thread) + manifest
+patches/kodi/                   nineteen Kodi patches (charset, SMB hooks, log sink, renderer, refresh, HDR framebuffer, HLG shader, native keyboard, curl idle-close off-thread and waits, binary add-on loader seam, Python init reporting) + manifest
 patches/ps5-opengl/             Kodi's additions to the GL driver/runtime (zero-copy textures, HDR scanout switch), written against the ps5-opengl revision in PS5-OPENGL-COMMIT
 patches/                        fix for older native-app template converters
 shims/native-app/               C library gaps, compiled into the title
@@ -345,6 +357,16 @@ title/sce_sys/                  Kodi's icon
 - **Dynamic linking.** A title cannot resolve symbols by name
   (`sceKernelDlsym` fails), and the loader leaves weak imports empty; functions
   the SDK's stubs lack (e.g. the VRR unpeg) come from an extended link stub.
+- **C library.** A title's C library is the template's clean-room `libc.prx`,
+  not FreeBSD's, while the SDK headers are FreeBSD's. Its `FILE` layout
+  differs, so C code must not use the headers' inline stdio macros
+  (`getc_unlocked`, `fileno`; Python is built without them); it has no
+  `getcwd`, and `fopen` does not set POSIX errno values (both shimmed).
+- **Python's sockets** run on `libSceNet`: the socket module is redirected
+  at compile time (`pacbrew/python3/ps5_pysocket.h`), because the title may
+  not set sockets non-blocking with `ioctl(FIONBIO)` and `sceNetSocket`
+  rejects the `SOCK_CLOEXEC` flag. Kodi's own networking (curl, SMB) is
+  untouched.
 </details>
 
 ## Debugging
@@ -366,16 +388,16 @@ sed -n "$((N+1)),$((N+40))p" kodi-klog.txt | grep -a -o "^# [0-9a-f]\{16\}" | aw
 
 ## Roadmap
 
-1. Internet access (curl/TLS): add-on repository, scrapers, online streams.
-   The CA bundle reaches curl; `kodi-debug` runs a network self-test.
-2. Python add-ons: a static CPython 3.14 (`scripts/19-build-python.sh`,
-   `pacbrew/python3`) that Kodi's configure picks up; then binary add-ons
-   through a static registry.
-3. The player debug overlay (L3) during VRR: keep the paced rate
+1. Binary add-ons: an in-process ELF loader (`overlay/xbmc/platform/ps5/elf/`,
+   host-tested) for `inputstream.adaptive`; Pillow built into the interpreter.
+2. Add-on install speed.
+3. Thread stacks out of the title's small flexible-memory pool (it also
+   holds the hardware decoder's workspace).
+4. The player debug overlay (L3) during VRR: keep the paced rate
    (`kodi-debug` logs presented frames, pacing and render time every 5 s).
-4. GL driver: cheaper clears and draws at 4K, runtime-selected render size.
-5. A DualSense joystick driver.
-6. Passthrough confirmation: whether the PS5 passes IEC 61937 PCM through
+5. GL driver: cheaper clears and draws at 4K, runtime-selected render size.
+6. A DualSense joystick driver.
+7. Passthrough confirmation: whether the PS5 passes IEC 61937 PCM through
    bit-exactly (2 channels first, then the 8-channel HBR formats).
 
 ## Comparison with upstream
