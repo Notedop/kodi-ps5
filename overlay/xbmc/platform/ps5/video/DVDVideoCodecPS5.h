@@ -10,6 +10,7 @@
 
 #include "VideoBufferPS5.h"
 #include "VideoDec2.h"
+#include "cores/VideoPlayer/DVDCodecs/DVDCodecs.h" // CDVDCodecOptions (stored for the software fallback)
 #include "cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h"
 #include "cores/VideoPlayer/DVDStreamInfo.h"
 
@@ -38,9 +39,11 @@ namespace KODI::PLATFORM::PS5
 /*!
  * Hardware H.264 / HEVC Main decoding on the PS5 (libSceVideodec2).
  *
- * Pictures are copied out of the decoder's frame buffers into Kodi's NV12
- * system-memory buffers, which the OpenGL renderer uploads as usual. Streams
- * the decoder cannot take (other codecs, 10-bit, 4:2:2 ...) fall back to FFmpeg.
+ * H.264 (and High 10 where the decoder accepts it), HEVC Main/Main10 and VP9
+ * profiles 0/2 up to 3840x2176 go to the hardware; other codecs, 4:2:2/4:4:4
+ * and 12-bit go to FFmpeg. A stream the hardware refuses before its first
+ * picture is replayed from its start, first in hardware with a cleaned
+ * bitstream, then in software (see RunRecovery).
  * An empty file "kodi-swdecode" in the title folder turns this decoder off.
  */
 class CDVDVideoCodecPS5 : public CDVDVideoCodec
@@ -108,13 +111,49 @@ private:
 
   // shared with zero-copy pictures: the decoder's memory lives until the last
   // picture showing one of its frames is released
-  // Software fallback: if the hardware decoder refuses a stream before it has
-  // produced a single picture, decoding continues on FFmpeg (see
-  // SwitchToSoftware) instead of the player waiting forever for a first frame.
+  // Recovery when the hardware decoder refuses a stream before its first
+  // picture. Every packet is kept until the first picture appears; on refusal
+  // the stream is replayed from its start, first in hardware with a cleaned
+  // bitstream (stage 1: SEI, AUD, filler and unspecified NAL units such as
+  // Dolby Vision RPU/EL removed, decoding from the first IRAP with every
+  // parameter set), then, if that is refused too, in software (stage 2).
+  // Streams the hardware takes as they are never enter this path.
+  struct ReplayPacket
+  {
+    std::vector<uint8_t> data;
+    double pts;
+    double dts;
+    bool recoveryPoint;
+  };
+  bool FeedHardware(const DemuxPacket& packet);
+  void BufferForReplay(const DemuxPacket& packet);
+  void ResetDecoderState();
+  bool RunRecovery();
   bool SwitchToSoftware();
+  bool CleanAccessUnit(const uint8_t* data, size_t size, std::vector<uint8_t>& out,
+                       bool& irap, bool& hasSlice) const;
+  void LogFingerprint(const char* what, const uint8_t* data, size_t size) const;
+  // Length-prefixed NAL units (MP4/MKV layout) without codec extradata: the
+  // Annex-B filter needs extradata to run, so convert here; the parameter sets
+  // are then in-band. Returns false (out untouched) for Annex-B input.
+  bool ToAnnexB(const uint8_t* data, size_t size, std::vector<uint8_t>& out) const;
+  std::vector<uint8_t> m_annexB;
+  bool m_loggedLengthPrefixed = false;
+  unsigned m_cleanNoSlice = 0;  // stage 1: access units with nothing decodable in them
+  unsigned m_cleanWaitIrap = 0; // stage 1: access units dropped waiting for a keyframe
   std::unique_ptr<CDVDVideoCodec> m_software;
   CDVDCodecOptions m_options;
   unsigned m_picturesOut = 0;
+  unsigned m_failuresBeforeFirst = 0; // decode failures while nothing has been shown yet
+  std::deque<ReplayPacket> m_replay;
+  size_t m_replayBytes = 0;
+  bool m_replayOverflow = false;
+  std::deque<ReplayPacket> m_softwareQueue; // replayed into FFmpeg before new packets
+  int m_recoveryStage = 0;                  // 0: as is, 1: cleaned bitstream, 2: software
+  bool m_recoveryPending = false;
+  bool m_cleanStream = false;
+  bool m_seenIrap = false;
+  bool m_fingerprinted = false;
 
   std::shared_ptr<KODI::PLATFORM::PS5::CVideoDec2> m_decoder =
       std::make_shared<KODI::PLATFORM::PS5::CVideoDec2>();
