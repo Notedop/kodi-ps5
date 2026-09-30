@@ -126,9 +126,19 @@ static void log_sockargs(int d, int t, int p, int rc)
 int ps5_socket(int domain, int type, int protocol)
 {
   net_init_once();
-  int s = sceNetSocket("python", domain, type, protocol);
-  log_sockargs(domain, type, protocol, s);
-  return s < 0 ? sce_fail_tagged("socket") : s;
+  /* Python ORs BSD flag bits into the type (SOCK_CLOEXEC = 0x10000000,
+     SOCK_NONBLOCK = 0x20000000). sceNet only accepts the bare socket type and
+     rejects the flags with EPROTONOSUPPORT (0x8041012b). Strip them: CLOEXEC
+     is meaningless in a title (no exec), and Python sets non-blocking mode
+     itself afterwards via its own fcntl/ioctl path when it needs it. */
+  int bare_type = type & ~(0x10000000 | 0x20000000);
+  int s = sceNetSocket("python", domain, bare_type, protocol);
+  if (s < 0)
+  {
+    log_sockargs(domain, type, protocol, s);
+    return sce_fail_tagged("socket");
+  }
+  return s;
 }
 int ps5_close(int fd)
 {
