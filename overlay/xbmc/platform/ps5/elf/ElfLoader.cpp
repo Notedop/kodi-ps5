@@ -100,10 +100,11 @@ bool resolve(Image* img, u32 symidx, u64* out, char* err, size_t errlen)
   // A wrong relocation count or entry size would walk past .rela.dyn and hand
   // us a nonsense index; dereferencing it faults in unmapped memory. Fail with
   // a message instead (seen on console: page fault inside resolve()).
-  if (!img->symtab || !img->strtab || (img->symcount && symidx >= img->symcount))
+  if (!img->symtab || !img->strtab || img->symcount == 0 || symidx >= img->symcount)
   {
-    std::snprintf(err, errlen, "bad symbol index %u (symbol table has %u entries)", symidx,
-                  img->symcount);
+    std::snprintf(err, errlen,
+                  "bad symbol index %u (symbol table has %u entries%s)", symidx, img->symcount,
+                  img->symcount == 0 ? ": DT_HASH/DT_GNU_HASH missing or unparsed" : "");
     return false;
   }
   const Sym& s = img->symtab[symidx];
@@ -318,6 +319,18 @@ Image* load(const void* image, size_t image_len, HostResolver resolver, void* us
   // symcount only needed by symbol(); relocations index directly.
 
   // Apply relocations.
+  // Refuse up front when the symbol count is unknown: resolve() would
+  // otherwise index the symbol table unchecked (page fault seen on console).
+  if (img->symcount == 0 && (relasz || pltrelsz))
+  {
+    std::snprintf(err, errlen,
+                  "no usable symbol count (DT_HASH/DT_GNU_HASH missing); %zu rela + %zu jmprel "
+                  "relocations need symbol lookups",
+                  relasz / sizeof(Rela), pltrelsz / sizeof(Rela));
+    munmap(m, span);
+    delete img;
+    return nullptr;
+  }
   if (rela && !apply_rela(img, rela, relasz / sizeof(Rela), err, errlen))
   {
     munmap(m, span); delete img; return nullptr;
