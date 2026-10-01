@@ -175,33 +175,11 @@ MAIN_O="$BUILD/CMakeFiles/kodi.dir/xbmc/platform/ps5/main.cpp.o"
 # (lld refuses the multi-relocation-section object that produces), so the
 # archives go straight into the boilerplate's lld invocation via a response
 # file, injected the same way ps5-opengl's builder injects its malloc wraps.
-# Binary add-on export table: if a symbol list has been generated for the
-# bundled add-ons (tools/ps5-gen-addon-exports.py), assemble it into the eboot
-# so the loader's resolver can bind the add-ons' C/C++ runtime imports. Without
-# a list, HostExports.cpp's weak-empty g_host_exports is used and nothing is
-# added here (Python and the rest of Kodi need no exports).
-HOST_EXPORTS_O=""
-if [ -n "${KODI_PS5_EXPORT_PADTEST:-}" ]; then
-  # Diagnostic: link a plain 1 KB object in the export table's slot instead of
-  # the generated table, through the full normal link. Build completes -> the
-  # table's *content* (its symbol references) is the trigger, not an extra
-  # object. Still segfaults -> any extra object in this slot is. Set
-  # KODI_PS5_EXPORT_PADTEST=1 to use it.
-  printf 'const char ps5_pad_blob[1040] = {1};\n' > "$APP/vendor/padtest.c"
-  "$PS5_PAYLOAD_SDK/bin/prospero-clang" -c -O2 -fPIC "$APP/vendor/padtest.c" -o "$APP/vendor/host_exports.o" \
-    && HOST_EXPORTS_O="$APP/vendor/host_exports.o" && echo "==> host export table: PADTEST (1040-byte blob, no symbols)"
-elif [ -s "$HERE/overlay/xbmc/platform/ps5/elf/host_exports.list" ]; then
-  source "${PS5_PAYLOAD_SDK}/toolchain/prospero.sh" 2>/dev/null || true
-  python3 "$HERE/tools/ps5-gen-addon-exports.py" \
-    < "$HERE/overlay/xbmc/platform/ps5/elf/host_exports.list" > "$APP/vendor/host_exports.c"
-  # Compiled as C: the table is filled by a startup constructor via &symbol
-  # (RIP-relative lea), so it carries no static data relocations - an absolute
-  # .quad table made the FSELF converter segfault.
-  "$PS5_PAYLOAD_SDK/bin/prospero-clang" -c -O2 -fPIC "$APP/vendor/host_exports.c" -o "$APP/vendor/host_exports.o" \
-    && HOST_EXPORTS_O="$APP/vendor/host_exports.o" \
-    && echo "==> host export table: $(grep -c 'g_host_exports\[' "$APP/vendor/host_exports.c") slots"
-fi
-{ echo "$MAIN_O"; [ -n "$HOST_EXPORTS_O" ] && echo "$HOST_EXPORTS_O"; cat "$APP/vendor/kodi-whole.txt"; } > "$APP/vendor/kodi-whole.rsp"
+# Binary add-on imports are resolved at run time against the eboot's own
+# dynamic symbol table (HostExports.cpp), so there is no generated export
+# object to add here - which is deliberate: the FSELF converter crashes on any
+# such object.
+{ echo "$MAIN_O"; cat "$APP/vendor/kodi-whole.txt"; } > "$APP/vendor/kodi-whole.rsp"
 LINK_SCRIPT="$APP/tools/build.sh"
 [ "$(grep -c -- '--wrap=malloc_usable_size \\$' "$LINK_SCRIPT")" = 1 ] || { echo "!! unexpected link line in $LINK_SCRIPT"; exit 1; }
 sed -i "/--wrap=malloc_usable_size \\\\$/a\\    --error-limit=0 --wrap=pthread_create --wrap=pipe --wrap=fcntl --wrap=chdir --wrap=write --wrap=fopen --whole-archive @$APP/vendor/kodi-whole.rsp --no-whole-archive \\\\" "$LINK_SCRIPT"

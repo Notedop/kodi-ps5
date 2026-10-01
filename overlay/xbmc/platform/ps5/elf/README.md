@@ -64,3 +64,17 @@ constructor ran. __deregister_frame on unload.
 
 Next: stage 2, a tiny binary add-on bundled in the title, to prove the
 DllAddon seam and two-way calls on the console.
+
+## Import resolution — self-dynsym (final design)
+The generated export-table object was abandoned: the FSELF converter
+(ps5-native-tool) segfaults on ANY added defined-data object in the eboot
+(bisected - a 1 KB blob in the same link slot also crashed it; it was never
+relocations, the symbol name, or a constructor). So nothing is added to the
+link. Instead host_export_resolver (HostExports.cpp) reads the eboot's OWN
+dynamic symbol table at run time - walk _DYNAMIC -> DT_SYMTAB/STRTAB, count via
+DT_HASH nchain or the GNU-hash tail, linear-scan by name - and returns the
+address of the eboot's own copy of each C/C++ runtime symbol the add-on
+imports. No generated object, no new data, nothing for the converter to choke
+on. DT pointers are handled whether link-time (static eboot) or pre-relocated.
+Host-verified against a program's own dynsym; tools/ps5-gen-addon-exports.py
+and host_exports.list are retired.
