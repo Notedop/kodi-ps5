@@ -4,7 +4,11 @@
 #include <cstdint>
 #include <cstring>
 #include <elf.h>
-#include <link.h>
+
+// The SDK's <link.h> does not define glibc's ElfW() macro, and _DYNAMIC
+// may not be declared. The target is always ELF64; use the concrete types
+// and declare _DYNAMIC ourselves (every PIE/-shared image defines it).
+extern "C" Elf64_Dyn _DYNAMIC[];
 
 // Resolve a binary add-on's undefined C/C++ runtime imports (memcpy, malloc,
 // pthread_*, __cxa_atexit, _Unwind_*, ...) against the SAME definitions the
@@ -25,11 +29,11 @@ namespace
 {
 struct Self
 {
-  const ElfW(Sym)* symtab = nullptr;
+  const Elf64_Sym* symtab = nullptr;
   const char* strtab = nullptr;
-  const ElfW(Rela)* rela = nullptr;   // DT_RELA (.rela.dyn)
+  const Elf64_Rela* rela = nullptr;   // DT_RELA (.rela.dyn)
   size_t rela_n = 0;
-  const ElfW(Rela)* jmprel = nullptr; // DT_JMPREL (.rela.plt)
+  const Elf64_Rela* jmprel = nullptr; // DT_JMPREL (.rela.plt)
   size_t jmprel_n = 0;
   uintptr_t base = 0;
   bool ready = false;
@@ -38,13 +42,13 @@ Self g;
 
 uintptr_t page_down(uintptr_t a) { return a & ~uintptr_t(0xfff); }
 
-const ElfW(Ehdr)* find_ehdr(uintptr_t from)
+const Elf64_Ehdr* find_ehdr(uintptr_t from)
 {
   for (uintptr_t p = page_down(from); p; p -= 0x1000)
   {
     const auto* m = reinterpret_cast<const unsigned char*>(p);
     if (m[0] == 0x7f && m[1] == 'E' && m[2] == 'L' && m[3] == 'F')
-      return reinterpret_cast<const ElfW(Ehdr)*>(p);
+      return reinterpret_cast<const Elf64_Ehdr*>(p);
     if (from - p > (256u << 20))
       break;
   }
@@ -58,11 +62,11 @@ void init()
   g.ready = true;
 
   const uintptr_t dyn_run = reinterpret_cast<uintptr_t>(&_DYNAMIC[0]);
-  const ElfW(Ehdr)* eh = find_ehdr(dyn_run);
+  const Elf64_Ehdr* eh = find_ehdr(dyn_run);
   if (!eh)
     return;
   const uintptr_t imgbase = reinterpret_cast<uintptr_t>(eh);
-  const ElfW(Phdr)* ph = reinterpret_cast<const ElfW(Phdr)*>(imgbase + eh->e_phoff);
+  const Elf64_Phdr* ph = reinterpret_cast<const Elf64_Phdr*>(imgbase + eh->e_phoff);
   uintptr_t dyn_vaddr = 0;
   for (unsigned i = 0; i < eh->e_phnum; ++i)
     if (ph[i].p_type == PT_DYNAMIC)
@@ -77,31 +81,31 @@ void init()
   auto fix = [&](uintptr_t p) -> uintptr_t {
     return (p >= imgbase && p < imgbase + (uintptr_t(1) << 33)) ? p : bias + p;
   };
-  size_t relasz = 0, relaent = sizeof(ElfW(Rela));
+  size_t relasz = 0, relaent = sizeof(Elf64_Rela);
   size_t pltrelsz = 0;
-  for (const ElfW(Dyn)* d = _DYNAMIC; d->d_tag != DT_NULL; ++d)
+  for (const Elf64_Dyn* d = _DYNAMIC; d->d_tag != DT_NULL; ++d)
   {
     switch (d->d_tag)
     {
-      case DT_SYMTAB:   g.symtab = reinterpret_cast<const ElfW(Sym)*>(fix(d->d_un.d_ptr)); break;
+      case DT_SYMTAB:   g.symtab = reinterpret_cast<const Elf64_Sym*>(fix(d->d_un.d_ptr)); break;
       case DT_STRTAB:   g.strtab = reinterpret_cast<const char*>(fix(d->d_un.d_ptr)); break;
-      case DT_RELA:     g.rela = reinterpret_cast<const ElfW(Rela)*>(fix(d->d_un.d_ptr)); break;
+      case DT_RELA:     g.rela = reinterpret_cast<const Elf64_Rela*>(fix(d->d_un.d_ptr)); break;
       case DT_RELASZ:   relasz = d->d_un.d_val; break;
       case DT_RELAENT:  relaent = d->d_un.d_val; break;
-      case DT_JMPREL:   g.jmprel = reinterpret_cast<const ElfW(Rela)*>(fix(d->d_un.d_ptr)); break;
+      case DT_JMPREL:   g.jmprel = reinterpret_cast<const Elf64_Rela*>(fix(d->d_un.d_ptr)); break;
       case DT_PLTRELSZ: pltrelsz = d->d_un.d_val; break;
       default: break;
     }
   }
   if (relaent == 0)
-    relaent = sizeof(ElfW(Rela));
+    relaent = sizeof(Elf64_Rela);
   g.rela_n = relasz / relaent;
   g.jmprel_n = pltrelsz / relaent;
 }
 
 // If this relocation names `name`, return the resolved address from its GOT
 // slot (the slot content, not its address). 0 if not a match / not filled.
-void* from_rela(const ElfW(Rela)* r, const char* name)
+void* from_rela(const Elf64_Rela* r, const char* name)
 {
   const uint32_t type = ELF64_R_TYPE(r->r_info);
   if (type != R_X86_64_GLOB_DAT && type != R_X86_64_JUMP_SLOT)
