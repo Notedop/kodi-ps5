@@ -204,6 +204,13 @@ BUILTINS="$(clang-18 --print-resource-dir)/lib/linux/libclang_rt.builtins-x86_64
 {
   printf 'SEARCH_DIR("%s")\n' "$APP/.deps/native/ps5-payload-sdk/target/lib"
   printf 'EXTERN(ps5_agc_gate2_run)\n'
+  # Pull the unwinder's dynamic-frame registration from libunwind.a: the binary
+  # add-on loader calls __register_frame/__deregister_frame (ElfLoader.cpp) to
+  # register a loaded add-on's .eh_frame, but nothing else in a static eboot
+  # references them, so without EXTERN the archive members are left out and the
+  # FSELF converter reports them undefined.
+  printf 'EXTERN(__register_frame)\n'
+  printf 'EXTERN(__deregister_frame)\n'
   printf 'GROUP (\n'
   while read -r lib; do [ -n "$lib" ] && printf '  "%s"\n' "$lib"; done < "$APP/vendor/kodi-deps.txt"
   for lib in "$PS5_PAYLOAD_SDK/target/lib/libunwind.a" "$PS5_PAYLOAD_SDK/target/lib/libc++abi.a" \
