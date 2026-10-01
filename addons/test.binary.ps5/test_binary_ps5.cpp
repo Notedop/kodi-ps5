@@ -84,3 +84,16 @@ extern "C" int ADDON_Create(void* instance, const char* /*globalApiVersion*/, vo
 }
 
 extern "C" void ADDON_Destroy() {}
+
+// Kodi's binary loader resolves these alongside ADDON_Create (DllAddon.h):
+// ADDON_GetTypeVersion is required, ADDON_GetTypeMinVersion optional. Return
+// the ABI version string Kodi expects for the add-on type; for this loader
+// test the value only has to be non-null and stable.
+extern "C" const char* ADDON_GetTypeVersion(int /*type*/)
+{
+  return "1.0.0";
+}
+extern "C" const char* ADDON_GetTypeMinVersion(int /*type*/)
+{
+  return "1.0.0";
+}

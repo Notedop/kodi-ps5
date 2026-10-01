@@ -145,6 +145,8 @@ private:
   CDVDCodecOptions m_options;
   unsigned m_picturesOut = 0;
   unsigned m_failuresBeforeFirst = 0; // decode failures while nothing has been shown yet
+  unsigned m_midStreamResets = 0;     // decoder resyncs after a mid-stream failure run
+  bool m_waitKeyframe = false;        // after a resync: drop AUs until a keyframe
   std::deque<ReplayPacket> m_replay;
   size_t m_replayBytes = 0;
   bool m_replayOverflow = false;

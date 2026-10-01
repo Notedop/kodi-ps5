@@ -18,6 +18,15 @@
 
 using namespace KODI::PLATFORM::PS5;
 
+namespace KODI::PLATFORM::PS5
+{
+VideoFrameStats& ps5_video_frame_stats()
+{
+  static VideoFrameStats s;
+  return s;
+}
+} // namespace KODI::PLATFORM::PS5
+
 CBaseRenderer* CRendererPS5::Create(CVideoBuffer* buffer)
 {
   if (dynamic_cast<CVideoBufferPS5*>(buffer))
@@ -200,6 +209,9 @@ bool CRendererPS5::UploadTexture(int index)
 
 void CRendererPS5::AfterRenderHook(int idx)
 {
+  // a frame has been drawn for this buffer: counts as presented
+  ps5_video_frame_stats().presented.fetch_add(1, std::memory_order_relaxed);
+
   if (glIsSync(m_fences[idx]))
     glDeleteSync(m_fences[idx]);
   m_fences[idx] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);

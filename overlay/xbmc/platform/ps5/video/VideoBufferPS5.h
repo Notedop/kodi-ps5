@@ -8,6 +8,22 @@
 
 #pragma once
 
+#include <atomic>
+
+namespace KODI::PLATFORM::PS5
+{
+// Frame counters for the 5-second "PS5 presentation" stats line: the codec
+// bumps decoded as pictures leave the decoder, the renderer bumps presented as
+// frames reach the screen. A black screen with audio is diagnosed by which of
+// the two stops moving.
+struct VideoFrameStats
+{
+  std::atomic<unsigned> decoded{0};
+  std::atomic<unsigned> presented{0};
+};
+VideoFrameStats& ps5_video_frame_stats();
+} // namespace KODI::PLATFORM::PS5
+
 /*
  * Zero-copy video on the PS5: a picture is the hardware decoder's own frame,
  * shown by CRendererPS5 through textures over that memory (driver additions

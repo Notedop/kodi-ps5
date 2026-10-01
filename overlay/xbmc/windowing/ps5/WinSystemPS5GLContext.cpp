@@ -8,6 +8,8 @@
 
 #include "WinSystemPS5GLContext.h"
 
+#include "platform/ps5/video/VideoBufferPS5.h"
+
 #include "platform/ps5/SandboxPS5.h"
 #include "platform/ps5/VideoOutInfo.h"
 #include "settings/DisplaySettings.h"
@@ -380,10 +382,15 @@ void CWinSystemPS5GLContext::PresentRender(bool rendered, bool videoLayer)
       {
         CLog::Log(LOGINFO,
                   "PS5 presentation (kodi-debug): {:.1f} frames/s ({:.1f}/s with GUI content), "
-                  "paced at {:.3f} Hz, {}, render {:.1f} ms average / {:.1f} ms longest",
+                  "paced at {:.3f} Hz, {}, render {:.1f} ms average / {:.1f} ms longest, "
+                  "video decoded {} presented {}",
                   m_statFrames / seconds, m_statGuiFrames / seconds, VrrTargetRate(),
                   VrrTargetRate() > 0.0f ? "VRR link" : "fixed-rate output",
-                  m_statFrames ? m_statRenderMs / m_statFrames : 0.0, m_statRenderMaxMs);
+                  m_statFrames ? m_statRenderMs / m_statFrames : 0.0, m_statRenderMaxMs,
+                  KODI::PLATFORM::PS5::ps5_video_frame_stats().decoded.load(
+                      std::memory_order_relaxed),
+                  KODI::PLATFORM::PS5::ps5_video_frame_stats().presented.load(
+                      std::memory_order_relaxed));
         m_statFrames = m_statGuiFrames = 0;
         m_statRenderMs = m_statRenderMaxMs = 0.0;
         m_statWindow = now;

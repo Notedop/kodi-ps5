@@ -32,5 +32,17 @@ DEST="${KODI_BUILD:-$HOME/kodi-ps5-build}/addons/test.binary.ps5"
 mkdir -p "$DEST"
 cp "$ADDON/addon.xml" "$ADDON/test_binary_ps5.so" "$DEST/"
 echo "    staged to $DEST"
-echo "==> done. Rebuild+deploy so the export table is linked into the eboot and"
-echo "    the add-on ships: scripts/20, cmake --build, scripts/30-deploy.sh"
+# Upload straight to the console: the deploy's share/ copy has missed the .so
+# before (addon.xml shipped, library did not), which looks exactly like "Kodi
+# found the add-on but never loaded it".
+PS5="${PS5_IP:-192.168.66.55}"
+DESTDIR="/data/homebrew/PPSA99420/share/kodi/addons/test.binary.ps5"
+echo "==> uploading to $PS5:$DESTDIR"
+for f in addon.xml test_binary_ps5.so; do
+  curl -s --ftp-create-dirs -T "$ADDON/$f" "ftp://$PS5:2121$DESTDIR/$f" \
+    && echo "    sent $f" || echo "    !! failed to send $f (is Kodi closed / FTP up?)"
+done
+echo "==> on the console: Settings > Interface > Screensaver > PS5 Binary Loader Test,"
+echo "    then preview it (or wait for it) - that is what loads the .so."
+echo "==> files now on the console:"
+curl -s "ftp://$PS5:2121$DESTDIR/" | awk '{print "    " $NF}' 

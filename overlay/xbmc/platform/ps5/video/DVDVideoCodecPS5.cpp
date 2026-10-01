@@ -53,6 +53,13 @@ using namespace KODI::PLATFORM::PS5;
 namespace
 {
 constexpr unsigned kMaxErrorsInRow = 60; // then give up (Kodi shows an error)
+// A stream that decoded fine and then starts failing (a damaged access unit, a
+// discontinuity, a stream change) used to freeze: the pre-first-picture
+// recovery does not apply once pictures have been shown, and the decoder never
+// recovers on its own. After this many failures in a row mid-stream, reset the
+// decoder and resync - Kodi feeds a keyframe shortly after, as on a seek.
+constexpr unsigned kErrorsBeforeResync = 12;
+constexpr unsigned kMaxMidStreamResets = 6; // then hand the rest to FFmpeg
 // Before the first picture: this many failed decodes (in total, not in a row)
 // hand the stream to FFmpeg. Kept below the 20 decoder frame buffers, because
 // a refused access unit can leave its frame with the decoder: after 20 of them
@@ -553,6 +560,22 @@ bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
   // access units): the hardware decoder is closed, drop the rest
   if (m_software || m_recoveryPending)
     return true; // the stream is replayed from its start
+  // After a mid-stream resync the decoder has no reference frames: feeding it
+  // mid-GOP pictures just fails again. Drop access units until a keyframe.
+  if (m_waitKeyframe)
+  {
+    std::vector<uint8_t> tmp;
+    bool irap = false, hasSlice = false;
+    CleanAccessUnit(data, size, tmp, irap, hasSlice);
+    if (!irap)
+    {
+      NextPts(); // its timestamp goes with it
+      return true;
+    }
+    m_waitKeyframe = false;
+    CLog::Log(LOGINFO, "CDVDVideoCodecPS5: resynced on a keyframe");
+  }
+
   std::vector<uint8_t> cleaned;
   if (m_cleanStream)
   {
@@ -627,6 +650,32 @@ bool CDVDVideoCodecPS5::DecodeOne(const uint8_t* data, size_t size)
         m_recoveryPending = true; // AddData replays the stream in the next stage
         return false;
       }
+    }
+    // Mid-stream: pictures have been shown, so the stream itself is decodable.
+    // Resync the decoder rather than freeze; if it keeps happening, finish the
+    // file in software instead of stuttering through repeated resyncs.
+    if (m_picturesOut > 0 && m_errorsInRow >= kErrorsBeforeResync)
+    {
+      if (++m_midStreamResets > kMaxMidStreamResets)
+      {
+        CLog::Log(LOGWARNING,
+                  "CDVDVideoCodecPS5: {} failed resyncs on {}; continuing in software",
+                  m_midStreamResets - 1, m_streamName);
+        if (SwitchToSoftware())
+          return false;
+        m_fatal = true;
+        return false;
+      }
+      CLog::Log(LOGWARNING,
+                "CDVDVideoCodecPS5: {} decode errors mid-stream on {}; resetting the decoder "
+                "and resyncing (resync {})",
+                m_errorsInRow, m_streamName, m_midStreamResets);
+      ResetDecoderState();   // drops queued pictures and pending access units
+      m_decoder->Reset();    // reclaims the decoder's frame buffers
+      m_errorsInRow = 0;
+      m_seenIrap = false;    // wait for the next keyframe before decoding again
+      m_waitKeyframe = true;
+      return false;
     }
     if (m_errorsInRow >= kMaxErrorsInRow)
     {
@@ -1025,6 +1074,8 @@ void CDVDVideoCodecPS5::Reset()
   m_seenIrap = false;
   m_cleanNoSlice = 0;
   m_cleanWaitIrap = 0;
+  m_waitKeyframe = false;
+  m_midStreamResets = 0;
 }
 
 void CDVDVideoCodecPS5::ResetDecoderState()
@@ -1075,6 +1126,7 @@ CDVDVideoCodec::VCReturn CDVDVideoCodecPS5::GetPicture(VideoPicture* pVideoPictu
 
   Decoded d = m_decoded.front();
   m_decoded.pop_front();
+  KODI::PLATFORM::PS5::ps5_video_frame_stats().decoded.fetch_add(1, std::memory_order_relaxed);
   if (m_picturesOut++ == 0)
   {
     m_replay.clear(); // the hardware takes this stream: nothing to replay
