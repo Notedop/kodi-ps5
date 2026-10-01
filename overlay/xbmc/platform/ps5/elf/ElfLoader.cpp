@@ -25,7 +25,7 @@ struct Rela { u64 r_offset; u64 r_info; i64 r_addend; };
 
 constexpr u16 ET_DYN = 3;
 constexpr u16 EM_X86_64 = 62;
-constexpr u32 PT_LOAD = 1, PT_DYNAMIC = 2, PT_TLS = 7;
+constexpr u32 PT_LOAD = 1, PT_DYNAMIC = 2, PT_TLS = 7, PT_GNU_EH_FRAME = 0x6474e550;
 constexpr u32 PF_X = 1, PF_W = 2, PF_R = 4;
 
 constexpr i64 DT_NULL=0, DT_HASH=4, DT_STRTAB=5, DT_SYMTAB=6, DT_RELA=7, DT_RELASZ=8,
@@ -65,6 +65,8 @@ struct Image
   size_t init_arrayn = 0;
   HostResolver resolver = nullptr;
   void* user = nullptr;
+  u8* eh_frame_hdr = nullptr; // PT_GNU_EH_FRAME (.eh_frame_hdr), for the unwinder
+  bool eh_registered = false;
   Stats st{};
 };
 
@@ -186,6 +188,7 @@ Image* load(const void* image, size_t image_len, HostResolver resolver, void* us
   u64 min_v = ~0ull, max_v = 0;
   const Phdr* dynph = nullptr;
   bool has_tls = false;
+  u64 eh_frame_hdr_v = 0; // PT_GNU_EH_FRAME vaddr; resolved to a pointer after base is known
   for (u16 i = 0; i < e->e_phnum; ++i)
   {
     if (ph[i].p_type == PT_LOAD)
@@ -194,6 +197,8 @@ Image* load(const void* image, size_t image_len, HostResolver resolver, void* us
       u64 end = ph[i].p_vaddr + ph[i].p_memsz;
       max_v = end > max_v ? end : max_v;
     }
+    else if (ph[i].p_type == PT_GNU_EH_FRAME)
+      eh_frame_hdr_v = ph[i].p_vaddr;
     else if (ph[i].p_type == PT_DYNAMIC)
       dynph = &ph[i];
     else if (ph[i].p_type == PT_TLS)
@@ -212,6 +217,7 @@ Image* load(const void* image, size_t image_len, HostResolver resolver, void* us
   img->map = static_cast<u8*>(m);
   img->span = span;
   img->base = static_cast<u8*>(m) - base_v; // load bias
+  if (eh_frame_hdr_v) img->eh_frame_hdr = img->base + eh_frame_hdr_v;
   img->resolver = resolver;
   img->user = user;
   (void)has_tls;
@@ -301,9 +307,55 @@ Image* load(const void* image, size_t image_len, HostResolver resolver, void* us
   return img;
 }
 
+// libgcc's unwinder keeps a registry of .eh_frame sections. A JIT-mapped
+// object is invisible to it until registered, so a C++ exception thrown inside
+// a binary add-on would otherwise reach std::terminate instead of its own
+// catch. __register_frame takes the .eh_frame; we locate it from the
+// PT_GNU_EH_FRAME header (.eh_frame_hdr), whose 4-byte prologue is followed by
+// an encoded pointer to .eh_frame.
+extern "C" void __register_frame(const void*) __attribute__((weak));
+extern "C" void __deregister_frame(const void*) __attribute__((weak));
+
+namespace
+{
+// Decode the eh_frame_hdr's eh_frame_ptr (DW_EH_PE encoding in byte 1).
+// ISA's toolchain emits pcrel|sdata4 (0x1b), the GNU default; handle that and
+// the absolute encodings, and give up (no registration) on anything else.
+u8* eh_frame_from_hdr(u8* hdr)
+{
+  if (!hdr) return nullptr;
+  const u8 eh_frame_ptr_enc = hdr[1];
+  const u8* p = hdr + 4; // version(1) + eh_frame_ptr_enc(1) + fde_count_enc(1) + table_enc(1)
+  const u8 app = eh_frame_ptr_enc & 0x70;
+  const u8 fmt = eh_frame_ptr_enc & 0x0f;
+  long long val = 0;
+  const u8* vp = p;
+  switch (fmt)
+  {
+    case 0x03: { int32_t v; std::memcpy(&v, vp, 4); val = v; break; }           // sdata4
+    case 0x0b: { uint32_t v; std::memcpy(&v, vp, 4); val = (int32_t)v; break; } // udata4 (treat signed)
+    case 0x01: { uintptr_t v; std::memcpy(&v, vp, sizeof v); val = (long long)v; break; } // uleb-ish/abs ptr
+    default: return nullptr;
+  }
+  if (app == 0x10) // DW_EH_PE_pcrel: relative to the location of eh_frame_ptr
+    return reinterpret_cast<u8*>(reinterpret_cast<uintptr_t>(p) + (intptr_t)val);
+  if (app == 0x00) // absolute
+    return reinterpret_cast<u8*>((uintptr_t)val);
+  return nullptr;
+}
+} // namespace
+
 void run_init(Image* img)
 {
   if (!img) return;
+  if (img->eh_frame_hdr && __register_frame && !img->eh_registered)
+  {
+    if (u8* eh = eh_frame_from_hdr(img->eh_frame_hdr))
+    {
+      __register_frame(eh);
+      img->eh_registered = true;
+    }
+  }
   if (img->init) img->init();
   for (size_t i = 0; i < img->init_arrayn; ++i)
     if (img->init_array[i]) img->init_array[i]();
@@ -323,8 +375,19 @@ void* symbol(Image* img, const char* name)
 
 Stats stats(const Image* img) { return img ? img->st : Stats{}; }
 
+static void deregister_eh(Image* img)
+{
+  if (img && img->eh_registered && __deregister_frame)
+  {
+    if (u8* eh = eh_frame_from_hdr(img->eh_frame_hdr))
+      __deregister_frame(eh);
+    img->eh_registered = false;
+  }
+}
+
 void unload(Image* img)
 {
+  deregister_eh(img);
   if (!img) return;
   if (img->map) munmap(img->map, img->span);
   delete img;

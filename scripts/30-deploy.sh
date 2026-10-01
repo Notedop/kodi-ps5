@@ -175,7 +175,21 @@ MAIN_O="$BUILD/CMakeFiles/kodi.dir/xbmc/platform/ps5/main.cpp.o"
 # (lld refuses the multi-relocation-section object that produces), so the
 # archives go straight into the boilerplate's lld invocation via a response
 # file, injected the same way ps5-opengl's builder injects its malloc wraps.
-{ echo "$MAIN_O"; cat "$APP/vendor/kodi-whole.txt"; } > "$APP/vendor/kodi-whole.rsp"
+# Binary add-on export table: if a symbol list has been generated for the
+# bundled add-ons (tools/ps5-gen-addon-exports.py), assemble it into the eboot
+# so the loader's resolver can bind the add-ons' C/C++ runtime imports. Without
+# a list, HostExports.cpp's weak-empty g_host_exports is used and nothing is
+# added here (Python and the rest of Kodi need no exports).
+HOST_EXPORTS_O=""
+if [ -s "$HERE/overlay/xbmc/platform/ps5/elf/host_exports.list" ]; then
+  source "${PS5_PAYLOAD_SDK}/toolchain/prospero.sh" 2>/dev/null || true
+  python3 "$HERE/tools/ps5-gen-addon-exports.py" \
+    < "$HERE/overlay/xbmc/platform/ps5/elf/host_exports.list" > "$APP/vendor/host_exports.S"
+  "$PS5_PAYLOAD_SDK/bin/prospero-clang" -c "$APP/vendor/host_exports.S" -o "$APP/vendor/host_exports.o" \
+    && HOST_EXPORTS_O="$APP/vendor/host_exports.o" \
+    && echo "==> host export table: $(grep -c '.quad' "$APP/vendor/host_exports.S") entries"
+fi
+{ echo "$MAIN_O"; [ -n "$HOST_EXPORTS_O" ] && echo "$HOST_EXPORTS_O"; cat "$APP/vendor/kodi-whole.txt"; } > "$APP/vendor/kodi-whole.rsp"
 LINK_SCRIPT="$APP/tools/build.sh"
 [ "$(grep -c -- '--wrap=malloc_usable_size \\$' "$LINK_SCRIPT")" = 1 ] || { echo "!! unexpected link line in $LINK_SCRIPT"; exit 1; }
 sed -i "/--wrap=malloc_usable_size \\\\$/a\\    --error-limit=0 --wrap=pthread_create --wrap=pipe --wrap=fcntl --wrap=chdir --wrap=write --wrap=fopen --whole-archive @$APP/vendor/kodi-whole.rsp --no-whole-archive \\\\" "$LINK_SCRIPT"

@@ -50,3 +50,17 @@ the one that works, and is what this loader uses.)
 The core is host-testable because ELF64/x86-64 relocation logic and
 `mmap`+`mprotect` are identical on the build host and PS5. See the harness in
 the project notes; it loads a synthetic `.so` and checks a computed result.
+
+## Stage 1 (toolchain probe) + exception handling — DONE (host-verified)
+`tools/ps5-isa-toolchain-probe.sh` builds a C++ .so with prospero-clang
+(exceptions, RTTI, a vtable, a global constructor, operator new/delete) and
+loads it through ps5elf. The loader now **registers the add-on's .eh_frame**
+with libgcc's unwinder in run_init (__register_frame, from the PT_GNU_EH_FRAME
+header), so a C++ exception thrown inside a loaded add-on reaches its own catch
+instead of std::terminate — the first blocker stage 1 surfaced, since
+inputstream.adaptive's JSON parser throws. Host harness result: relocations
+all handled (relative/glob_dat/jump_slot), tls=0, other=0, throw/catch works,
+constructor ran. __deregister_frame on unload.
+
+Next: stage 2, a tiny binary add-on bundled in the title, to prove the
+DllAddon seam and two-way calls on the console.
