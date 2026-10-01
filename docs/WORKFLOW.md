@@ -101,6 +101,21 @@ curl -s ftp://192.168.66.55:2121/data/homebrew/PPSA99420/share/kodi/python/lib/p
 
 Restart ShadowMountPlus (re-register the title), then launch Kodi.
 
+### Upload block (paste after quitting Kodi)
+
+```bash
+PS5=192.168.66.55
+D=~/kodi-ps5-stage/app/dist/PPSA99420
+curl -s -T "$D/eboot.bin" "ftp://$PS5:2121/data/homebrew/PPSA99420/eboot.bin" \
+  && echo "sent eboot.bin ($(stat -c%s "$D/eboot.bin") bytes)"
+curl -s "ftp://$PS5:2121/data/homebrew/PPSA99420/" \
+  | awk '$NF=="eboot.bin"{print "on console:", $5, "bytes"}'
+```
+
+The two sizes must match - that is the check that the new eboot actually
+landed. Kodi must be closed first: overwriting a running title's files can
+crash the console.
+
 ## 5. Capture the console log with nc
 
 Start the capture in a WSL terminal **just before** launching Kodi, leave it

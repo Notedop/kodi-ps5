@@ -283,6 +283,30 @@ Image* load(const void* image, size_t image_len, HostResolver resolver, void* us
       default: break;
     }
   }
+  // Every table pointer must land inside the mapping we just made. A d_val the
+  // image did not intend (or a base we computed wrong) otherwise faults on the
+  // first dereference in resolve(); seen on console as a page fault reading a
+  // fixed address. Report the numbers so the cause is visible, then fail.
+  {
+    const u8* lo = img->map;
+    const u8* hi = img->map + img->span;
+    auto inside = [&](const void* p) {
+      const u8* q = static_cast<const u8*>(p);
+      return q >= lo && q < hi;
+    };
+    if ((img->symtab && !inside(img->symtab)) || (img->strtab && !inside(img->strtab)))
+    {
+      std::snprintf(err, errlen,
+                    "dynamic tables outside the mapping: symtab %p strtab %p, "
+                    "mapped %p..%p (base %p)",
+                    static_cast<const void*>(img->symtab), static_cast<const void*>(img->strtab),
+                    static_cast<const void*>(lo), static_cast<const void*>(hi),
+                    static_cast<const void*>(img->base));
+      munmap(m, span);
+      delete img;
+      return nullptr;
+    }
+  }
   if (!img->symtab || !img->strtab)
   {
     munmap(m, span); delete img; return fail("missing DT_SYMTAB/DT_STRTAB");
