@@ -10,6 +10,15 @@
 // and declare _DYNAMIC ourselves (every PIE/-shared image defines it).
 extern "C" Elf64_Dyn _DYNAMIC[];
 
+// The SDK's <elf.h> spells the PLT relocation R_X86_64_JUMP_SLO (no trailing T)
+// and GLOB_DAT may vary too; pin both to their ABI values regardless.
+#ifndef R_X86_64_JUMP_SLOT
+#define R_X86_64_JUMP_SLOT 7
+#endif
+#ifndef R_X86_64_GLOB_DAT
+#define R_X86_64_GLOB_DAT 6
+#endif
+
 // Resolve a binary add-on's undefined C/C++ runtime imports (memcpy, malloc,
 // pthread_*, __cxa_atexit, _Unwind_*, ...) against the SAME definitions the
 // eboot uses. On this platform those symbols are not defined in the eboot -
