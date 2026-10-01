@@ -59,7 +59,8 @@ struct Image
   u16 phnum = 0;
   const Sym* symtab = nullptr;
   const char* strtab = nullptr;
-  u32 symcount = 0;
+  u32 symcount = 0;      // from DT_HASH nchain / GNU hash; 0 = unknown
+  size_t strsz = 0;      // DT_STRSZ, to bound st_name
   void (*init)() = nullptr;
   void (**init_array)() = nullptr;
   size_t init_arrayn = 0;
@@ -96,11 +97,26 @@ u32 gnu_hash_symcount(const u32* gh)
 // Resolve the symbol a relocation refers to. Returns false on hard failure.
 bool resolve(Image* img, u32 symidx, u64* out, char* err, size_t errlen)
 {
+  // A wrong relocation count or entry size would walk past .rela.dyn and hand
+  // us a nonsense index; dereferencing it faults in unmapped memory. Fail with
+  // a message instead (seen on console: page fault inside resolve()).
+  if (!img->symtab || !img->strtab || (img->symcount && symidx >= img->symcount))
+  {
+    std::snprintf(err, errlen, "bad symbol index %u (symbol table has %u entries)", symidx,
+                  img->symcount);
+    return false;
+  }
   const Sym& s = img->symtab[symidx];
   if (s.st_shndx != SHN_UNDEF)
   {
     *out = reinterpret_cast<u64>(img->base) + s.st_value; // defined here
     return true;
+  }
+  if (img->strsz && s.st_name >= img->strsz)
+  {
+    std::snprintf(err, errlen, "symbol %u: name offset %u past the string table (%zu bytes)",
+                  symidx, s.st_name, img->strsz);
+    return false;
   }
   const char* name = img->strtab + s.st_name;
   void* h = img->resolver ? img->resolver(name, img->user) : nullptr;
@@ -253,6 +269,7 @@ Image* load(const void* image, size_t image_len, HostResolver resolver, void* us
     switch (d->d_tag)
     {
       case DT_SYMTAB: img->symtab = reinterpret_cast<const Sym*>(img->base + d->d_val); break;
+      case 10: img->strsz = static_cast<size_t>(d->d_val); break; // DT_STRSZ
       case DT_STRTAB: img->strtab = reinterpret_cast<const char*>(img->base + d->d_val); break;
       case DT_RELA:   rela = reinterpret_cast<const Rela*>(img->base + d->d_val); break;
       case DT_RELASZ: relasz = d->d_val; break;
