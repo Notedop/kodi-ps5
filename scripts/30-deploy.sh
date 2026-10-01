@@ -181,7 +181,16 @@ MAIN_O="$BUILD/CMakeFiles/kodi.dir/xbmc/platform/ps5/main.cpp.o"
 # a list, HostExports.cpp's weak-empty g_host_exports is used and nothing is
 # added here (Python and the rest of Kodi need no exports).
 HOST_EXPORTS_O=""
-if [ -s "$HERE/overlay/xbmc/platform/ps5/elf/host_exports.list" ]; then
+if [ -n "${KODI_PS5_EXPORT_PADTEST:-}" ]; then
+  # Diagnostic: link a plain 1 KB object in the export table's slot instead of
+  # the generated table, through the full normal link. Build completes -> the
+  # table's *content* (its symbol references) is the trigger, not an extra
+  # object. Still segfaults -> any extra object in this slot is. Set
+  # KODI_PS5_EXPORT_PADTEST=1 to use it.
+  printf 'const char ps5_pad_blob[1040] = {1};\n' > "$APP/vendor/padtest.c"
+  "$PS5_PAYLOAD_SDK/bin/prospero-clang" -c -O2 -fPIC "$APP/vendor/padtest.c" -o "$APP/vendor/host_exports.o" \
+    && HOST_EXPORTS_O="$APP/vendor/host_exports.o" && echo "==> host export table: PADTEST (1040-byte blob, no symbols)"
+elif [ -s "$HERE/overlay/xbmc/platform/ps5/elf/host_exports.list" ]; then
   source "${PS5_PAYLOAD_SDK}/toolchain/prospero.sh" 2>/dev/null || true
   python3 "$HERE/tools/ps5-gen-addon-exports.py" \
     < "$HERE/overlay/xbmc/platform/ps5/elf/host_exports.list" > "$APP/vendor/host_exports.c"
