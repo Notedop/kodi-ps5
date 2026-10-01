@@ -184,10 +184,13 @@ HOST_EXPORTS_O=""
 if [ -s "$HERE/overlay/xbmc/platform/ps5/elf/host_exports.list" ]; then
   source "${PS5_PAYLOAD_SDK}/toolchain/prospero.sh" 2>/dev/null || true
   python3 "$HERE/tools/ps5-gen-addon-exports.py" \
-    < "$HERE/overlay/xbmc/platform/ps5/elf/host_exports.list" > "$APP/vendor/host_exports.S"
-  "$PS5_PAYLOAD_SDK/bin/prospero-clang" -c "$APP/vendor/host_exports.S" -o "$APP/vendor/host_exports.o" \
+    < "$HERE/overlay/xbmc/platform/ps5/elf/host_exports.list" > "$APP/vendor/host_exports.c"
+  # Compiled as C: the table is filled by a startup constructor via &symbol
+  # (RIP-relative lea), so it carries no static data relocations - an absolute
+  # .quad table made the FSELF converter segfault.
+  "$PS5_PAYLOAD_SDK/bin/prospero-clang" -c -O2 -fPIC "$APP/vendor/host_exports.c" -o "$APP/vendor/host_exports.o" \
     && HOST_EXPORTS_O="$APP/vendor/host_exports.o" \
-    && echo "==> host export table: $(grep -c '.quad' "$APP/vendor/host_exports.S") entries"
+    && echo "==> host export table: $(grep -c 'g_host_exports\[' "$APP/vendor/host_exports.c") slots"
 fi
 { echo "$MAIN_O"; [ -n "$HOST_EXPORTS_O" ] && echo "$HOST_EXPORTS_O"; cat "$APP/vendor/kodi-whole.txt"; } > "$APP/vendor/kodi-whole.rsp"
 LINK_SCRIPT="$APP/tools/build.sh"
